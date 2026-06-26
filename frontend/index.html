@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WinDTT</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Топ-бар ── -->
+<header class="topbar">
+  <div class="topbar-row1">
+    <span class="logo">WinDTT</span>
+    <span class="subtitle">WireGuard over VK TURN</span>
+    <div class="topbar-right">
+      <span id="socks-badge" class="badge hidden"><span class="dot"></span></span>
+      <span id="speed-badge" class="badge hidden"></span>
+      <span id="traffic-badge" class="badge hidden"></span>
+      <span id="workers-badge" class="badge hidden"></span>
+      <span id="status-badge" class="badge disconnected"><span class="dot"></span> Туннель выкл</span>
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Переключить тему">🌙</button>
+    </div>
+  </div>
+  <div class="topbar-row2">
+    <label class="topbar-chk" title="Перенаправить WinINET-трафик (Chrome, Edge, Office) через туннель">
+      <input id="px-sysproxy" type="checkbox" onchange="onSysProxyToggle()">
+      Системный прокси
+    </label>
+  </div>
+</header>
+
+<!-- ── Вкладки ── -->
+<nav class="tabs">
+  <button class="tab active" data-tab="connect">Подключение</button>
+  <button class="tab" data-tab="proxy">Proxy</button>
+  <button class="tab" data-tab="deploy">Deploy</button>
+  <button class="tab" data-tab="wg">WireGuard</button>
+  <button class="tab" data-tab="logs">Логи</button>
+  <button class="tab" data-tab="help">Справка</button>
+</nav>
+
+<!-- ── Контент вкладок ── -->
+<main class="content">
+
+  <!-- Подключение -->
+  <section id="tab-connect" class="tab-panel active">
+    <div class="card">
+      <div class="card-title">Быстрая вставка wdtt:// ссылки</div>
+      <div class="row-flex">
+        <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
+        <button class="btn btn-sm" onclick="pasteInput('wlink')">📋</button>
+        <button class="btn btn-primary btn-sm" onclick="parseWdtt()">Разобрать</button>
+      </div>
+    </div>
+
+    <div class="fields">
+      <div class="field-row" style="align-items:flex-start">
+        <label style="padding-top:6px">VK хеш &nbsp;(-vk)</label>
+        <div id="vk-list" style="flex:1;display:flex;flex-direction:column;gap:4px">
+          <div class="vk-hash-row">
+            <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
+            <button class="btn btn-sm" onclick="pasteVkHash(this)">📋</button>
+            <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" style="display:none">✕</button>
+          </div>
+        </div>
+        <button class="btn btn-sm" onclick="addVkHash()" title="Добавить хеш" style="margin-left:4px;margin-top:1px">+</button>
+      </div>
+      <div class="field-row">
+        <label>Фингерпринт</label>
+        <select id="fingerprint" class="sel">
+          <option value="chrome">chrome (по умолчанию)</option>
+          <option value="safari">safari</option>
+          <option value="firefox">firefox</option>
+          <option value="ios">ios</option>
+          <option value="android">android</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>VPS адрес:порт &nbsp;(-peer)</label>
+        <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
+        <button class="btn btn-sm" onclick="pasteInput('srv')">📋</button>
+      </div>
+      <div class="field-row">
+        <label>Secret &nbsp;(-password)</label>
+        <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
+        <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
+        <button class="btn btn-sm" onclick="pasteInput('sec')">📋</button>
+      </div>
+      <div class="field-row">
+        <label>Потоков &nbsp;(-n)</label>
+        <input id="n-workers" type="number" class="inp inp-sm" value="24" min="1" max="108">
+        <span class="hint">кратно 12, макс 108</span>
+      </div>
+      <div class="field-row">
+        <label>Listen &nbsp;(-listen)</label>
+        <input id="listen" type="text" class="inp inp-md" value="127.0.0.1:9000">
+      </div>
+      <div class="field-row">
+        <label>Режим капчи</label>
+        <select id="captcha-mode" class="sel">
+          <option value="auto">auto</option>
+          <option value="rjs">rjs</option>
+          <option value="wv">wv</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="bin-status" class="bin-status"></div>
+
+    <div class="btn-row">
+      <button id="btn-connect" class="btn btn-connect" onclick="connect()">▶  Подключить</button>
+      <button id="btn-pause"   class="btn btn-pause"   onclick="pauseResume()" disabled>⏸  Пауза</button>
+      <button id="btn-stop"    class="btn btn-stop"    onclick="stop()" disabled>■  Стоп</button>
+    </div>
+
+    <div id="captcha-panel" class="card" style="display:none;margin-top:8px">
+      <div class="warn-text">⚠ Требуется капча — вставьте токен:</div>
+      <div class="row-flex">
+        <input id="captcha-token" type="text" class="inp mono" placeholder="токен капчи">
+        <button class="btn btn-sm" onclick="pasteInput('captcha-token')">📋</button>
+        <button class="btn btn-primary btn-sm" onclick="sendCaptcha()">Отправить</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Прокси -->
+  <section id="tab-proxy" class="tab-panel hidden">
+    <div id="sysproxy-banner" class="proxy-status connected" style="display:none">
+      🌐 Системный прокси включён
+    </div>
+
+    <div id="proxy-status-label" class="proxy-status disconnected">● Локальный прокси выключен</div>
+
+    <div class="fields">
+      <div class="field-row">
+        <label>Хост</label>
+        <input id="px-host" type="text" class="inp inp-md" value="127.0.0.1">
+        <span class="hint">0.0.0.0 — доступен в сети</span>
+      </div>
+      <div class="field-row">
+        <label>SOCKS5 порт</label>
+        <input id="px-port" type="number" class="inp inp-sm" value="1080" min="1" max="65535">
+      </div>
+      <div class="field-row">
+        <label>HTTP порт</label>
+        <input id="px-http-port" type="number" class="inp inp-sm" value="1081" min="1" max="65535">
+      </div>
+      <div class="field-row">
+        <label>Авторизация</label>
+        <label class="chk-label"><input id="px-use-auth" type="checkbox" checked onchange="toggleAuth()"> логин/пароль</label>
+      </div>
+    </div>
+
+    <div id="auth-fields" class="fields">
+      <div class="field-row">
+        <label>Логин</label>
+        <input id="px-user" type="text" class="inp inp-md" placeholder="user">
+      </div>
+      <div class="field-row">
+        <label>Пароль</label>
+        <input id="px-pass" type="password" class="inp inp-md">
+        <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
+        <button class="btn btn-sm" title="Сгенерировать" onclick="genPass()">🎲</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button id="btn-pstart" class="btn btn-connect" onclick="proxyStart()">▶  Запустить</button>
+      <button id="btn-pstop"  class="btn btn-stop"   onclick="proxyStop()" disabled>■  Остановить</button>
+    </div>
+
+    <div id="proxy-hint" class="hint-box" style="display:none"></div>
+  </section>
+
+  <!-- Deploy -->
+  <section id="tab-deploy" class="tab-panel hidden">
+    <div class="deploy-layout">
+
+      <!-- Левая панель — поля -->
+      <div class="deploy-fields">
+        <div class="fields">
+          <div class="field-row">
+            <label>IP адрес VPS</label>
+            <input id="d-ip"   type="text" class="inp inp-md" placeholder="185.x.x.x">
+          </div>
+          <div class="field-row">
+            <label>SSH порт</label>
+            <input id="d-port" type="text" class="inp inp-sm" value="22">
+          </div>
+          <div class="field-row">
+            <label>Пользователь</label>
+            <input id="d-user" type="text" class="inp inp-md" placeholder="root">
+          </div>
+          <div class="field-row">
+            <label>Пароль SSH</label>
+            <input id="d-pwd"  type="password" class="inp inp-md">
+          </div>
+          <div class="field-row">
+            <label>WireGuard порт</label>
+            <input id="d-wg"   type="text" class="inp inp-sm" value="51820">
+          </div>
+          <div class="field-row">
+            <label>WinDTT порт</label>
+            <input id="d-wdtt" type="text" class="inp inp-sm" value="56000">
+          </div>
+
+        </div>
+
+        <div class="fields">
+          <div class="field-row">
+            <label>Пароль туннеля</label>
+            <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
+            <button class="btn btn-sm" onclick="genDeployPass()" title="Сгенерировать">🎲</button>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="deploy()">🚀  Установить wdtt-server</button>
+          <button class="btn btn-stop" onclick="undeploy()">🗑  Удалить</button>
+        </div>
+        <p class="hint" style="margin-top:4px;margin-bottom:10px">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
+
+        <details class="advanced-block">
+          <summary>Расширенные настройки сервера</summary>
+          <div class="fields" style="margin-top:8px">
+
+
+            <div class="field-row">
+              <label>Admin Telegram ID</label>
+              <input id="d-admin-id" type="text" class="inp inp-md" placeholder="опционально" title="Ваш Telegram ID — кто может управлять ботом">
+            </div>
+            <div class="field-row">
+              <label>Bot Token</label>
+              <input id="d-bot-token" type="text" class="inp inp-md" placeholder="опционально" title="Telegram-бот для управления сервером">
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- Правая панель — лог деплоя -->
+      <div class="deploy-log-panel">
+        <div class="deploy-log-header">
+          <span class="log-title">DEPLOY LOG</span>
+          <button class="btn btn-sm" onclick="clearDeployLog()">Очистить</button>
+        </div>
+        <div id="deploy-log-box" class="deploy-log-box"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- WireGuard -->
+  <section id="tab-wg" class="tab-panel hidden">
+    <p class="hint">Конфиг загружается автоматически при подключении туннеля. Можно также открыть существующий .conf файл.</p>
+    <textarea id="wg-conf" class="wg-conf" spellcheck="false">[Interface]
+PrivateKey = &lt;ваш_ключ&gt;
+Address = 10.0.0.2/32
+MTU = 1280
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = &lt;ключ_сервера&gt;
+Endpoint = 127.0.0.1:9000
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+</textarea>
+    <div class="btn-row">
+      <button class="btn" onclick="wgOpen()">📂 Открыть</button>
+      <button class="btn" onclick="wgCopy()">📋 Копировать</button>
+      <button class="btn" onclick="wgSave()">💾 Скачать .conf</button>
+      <span id="wg-copy-hint" class="hint" style="display:none">✔ Скопировано!</span>
+    </div>
+  </section>
+
+  <!-- Логи -->
+  <section id="tab-logs" class="tab-panel hidden">
+    <div class="log-panel-inner">
+      <div class="log-header">
+        <div class="log-tabs">
+          <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')">Туннель</button>
+          <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')">Прокси</button>
+        </div>
+        <div class="log-filters" id="log-filter-row">
+          <span class="filter-label">Фильтр:</span>
+          <label class="radio-label"><input type="radio" name="lf" value="all" checked onchange="setFilter('all')"> Все</label>
+          <label class="radio-label"><input type="radio" name="lf" value="info" onchange="setFilter('info')"> Info</label>
+          <label class="radio-label"><input type="radio" name="lf" value="warn" onchange="setFilter('warn')"> Warn</label>
+          <label class="radio-label"><input type="radio" name="lf" value="error" onchange="setFilter('error')"> Error</label>
+        </div>
+        <div class="log-btns">
+          <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог">💾</button>
+          <button class="btn btn-sm" onclick="clearLog()">Очистить</button>
+        </div>
+      </div>
+      <div id="log-box" class="log-box-full"></div>
+      <div id="socks-log-box" class="log-box-full" style="display:none"></div>
+    </div>
+  </section>
+
+  <!-- Справка -->
+  <section id="tab-help" class="tab-panel hidden">
+    <pre class="help-text" id="help-text"></pre>
+  </section>
+
+</main>
+
+<script src="main.js"></script>
+</body>
+</html>

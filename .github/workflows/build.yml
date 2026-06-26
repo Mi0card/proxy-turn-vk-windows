@@ -1,0 +1,190 @@
+name: Build WinDTT (Wails)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.cmp.outputs.changed }}
+      version: ${{ steps.cmp.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Compare versions
+        id: cmp
+        shell: bash
+        run: |
+          get_ver() {
+            git show "$1:app.go" 2>/dev/null \
+              | grep -oP 'AppVersion\s*=\s*"\K[^"]+' || echo ""
+          }
+          NEW=$(get_ver HEAD)
+          OLD=$(get_ver HEAD~1)
+          echo "version=$NEW" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manual run — forcing build (version: $NEW)"
+          elif [ "$NEW" != "$OLD" ] && [ -n "$NEW" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Version changed: $OLD → $NEW"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Version unchanged ($NEW), skipping build"
+          fi
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: windows-2025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false  # управляем кэшем вручную — разбиваем на части
+
+      # Кэш модулей основного проекта (лёгкий — wails + crypto/ssh)
+      - name: Cache Go modules (main)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod/github.com/wailsapp
+            ~/go/pkg/mod/golang.org/x/crypto
+            ~/go/pkg/mod/golang.org/x/sys
+            ~/go/pkg/mod/cache/download/github.com/wailsapp
+            ~/go/pkg/mod/cache/download/golang.org/x/crypto
+            ~/go/pkg/mod/cache/download/golang.org/x/sys
+          key: go-mod-main-${{ hashFiles('go.mod') }}
+          restore-keys: go-mod-main-
+
+      # Кэш модулей go_client (средний — pion, wireguard клиентская часть)
+      - name: Cache Go modules (go_client)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod/github.com/pion
+            ~/go/pkg/mod/github.com/bogdanfinn
+            ~/go/pkg/mod/github.com/cbeuw
+            ~/go/pkg/mod/cache/download/github.com/pion
+            ~/go/pkg/mod/cache/download/github.com/bogdanfinn
+          key: go-mod-client-${{ hashFiles('go_client/go.mod') }}
+          restore-keys: go-mod-client-
+
+      # Кэш модулей server_src (тяжёлый — wireguard + gvisor)
+      - name: Cache Go modules (server_src)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod/golang.zx2c4.com
+            ~/go/pkg/mod/gvisor.dev
+            ~/go/pkg/mod/cache/download/golang.zx2c4.com
+            ~/go/pkg/mod/cache/download/gvisor.dev
+          key: go-mod-server-${{ hashFiles('server_src/go.mod') }}
+          restore-keys: go-mod-server-
+
+      - name: Cache Wails CLI
+        id: cache-wails
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin/wails.exe
+          key: ${{ runner.os }}-wails-cli-v2-go1.24
+
+      - name: Install Wails CLI
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Ensure embed stubs exist
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "wdtt-client.exe")) {
+            [byte[]]$mz = @(0x4D,0x5A) + (New-Object byte[] 62)
+            [IO.File]::WriteAllBytes("wdtt-client.exe", $mz)
+          }
+          if (-not (Test-Path "assets/server/wdtt-server")) {
+            New-Item -ItemType Directory -Force -Path "assets/server" | Out-Null
+            [byte[]]$elf = @(0x7F,0x45,0x4C,0x46) + (New-Object byte[] 60)
+            [IO.File]::WriteAllBytes("assets/server/wdtt-server", $elf)
+          }
+
+      - name: Install dependencies
+        run: go mod tidy
+
+      # ── Кэш бинарников ───────────────────────────────────────────────────────
+      - name: Cache wdtt-server binary
+        id: cache-server
+        uses: actions/cache@v5
+        with:
+          path: assets/server/wdtt-server
+          key: wdtt-server-${{ hashFiles('server_src/**') }}
+
+      - name: Cache wdtt-client.exe binary
+        id: cache-client
+        uses: actions/cache@v5
+        with:
+          path: wdtt-client.exe
+          key: wdtt-client-${{ hashFiles('go_client/**') }}
+
+      # Собираем wdtt-server (Linux amd64) — только если исходники изменились
+      - name: Build wdtt-server
+        if: steps.cache-server.outputs.cache-hit != 'true'
+        working-directory: server_src
+        run: |
+          Remove-Item -Force -ErrorAction SilentlyContinue ..\assets\server\wdtt-server
+          go mod tidy
+          $env:GOOS = "linux"; $env:GOARCH = "amd64"; $env:CGO_ENABLED = "0"
+          go build -ldflags="-s -w" -o ../assets/server/wdtt-server .
+
+      # Собираем wdtt-client.exe — только если исходники изменились
+      - name: Build wdtt-client.exe
+        if: steps.cache-client.outputs.cache-hit != 'true'
+        working-directory: go_client
+        run: |
+          Remove-Item -Force -ErrorAction SilentlyContinue ..\wdtt-client.exe
+          go mod tidy
+          go build -ldflags="-s -w" -o ../wdtt-client.exe .
+
+      - name: Build WinDTT with Wails
+        run: |
+          wails build `
+            -platform windows/amd64 `
+            -ldflags "-s -w" `
+            -o "WinDTT-v${{ needs.check-version.outputs.version }}.exe"
+
+      # ── Подпись (self-signed, без timestamp) ─────────────────────────────────
+      - name: Sign (self-signed)
+        shell: pwsh
+        working-directory: build/bin
+        run: |
+          $exe = "WinDTT-v${{ needs.check-version.outputs.version }}.exe"
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=WinDTT, O=WinDTT Project, C=RU" `
+            -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -NotAfter (Get-Date).AddYears(3)
+          # Без -TimestampServer — убирает UnknownError от недоступного сервера
+          $result = Set-AuthenticodeSignature `
+            -FilePath $exe -Certificate $cert `
+            -HashAlgorithm SHA256
+          Write-Host "Подпись: $($result.Status)"
+
+      # Один файл — wdtt-client.exe вшит внутрь через go:embed
+      - name: Upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: WinDTT-v${{ needs.check-version.outputs.version }}-windows
+          path: build/bin/WinDTT-v${{ needs.check-version.outputs.version }}.exe
+          retention-days: 7

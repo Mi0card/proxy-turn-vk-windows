@@ -1,0 +1,81 @@
+# WinDTT
+
+Windows GUI-клиент для туннеля [WireGuard over VK TURN](https://github.com/amurcanov/proxy-turn-vk-android).
+
+Движок (`go_client`, `server_src`) — из репо [amurcanov/proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android), синхронизируется автоматически.
+GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
+
+> Образовательный проект. Не предназначен для производственного использования.
+
+## Скачать
+
+[Releases](../../releases) или [Actions](../../actions) → последний успешный билд → артефакт.
+
+## Возможности
+
+- Подключение по `wdtt://` ссылке или вручную
+- SOCKS5 + HTTP прокси с авторизацией через WireGuard userspace (gvisor netstack), без прав администратора
+- **Системный прокси** — чекбокс в шапке, перенаправляет WinINET-трафик (Chrome, Edge, Office) через туннель. Отдельный HTTP-прокси на случайном порту, без auth, без прав администратора
+- SSH деплой `wdtt-server` на VPS с проверкой fingerprint
+- Авто-загрузка WireGuard конфига, статус-бар с пингом через туннель
+- Светлая / тёмная тема
+
+## Системный прокси
+
+Чекбокс **Системный прокси** в шапке приложения.
+
+При включении поднимается отдельный HTTP-прокси на случайном порту (`127.0.0.1:<port>`, без аутентификации) и прописывается в настройках Windows (WinINET, ветка `HKCU`). Трафик идёт **только** через туннель — без туннеля браузеры получат ошибку прокси.
+
+- Требуется активный туннель. Без него запросы браузеров будут отклоняться (502).
+- Прав администратора не требуется.
+- При закрытии или аварийном завершении приложения настройки восстанавливаются автоматически.
+
+## Сборка
+
+Требуется: Go 1.21+, [Wails CLI](https://wails.io/docs/gettingstarted/installation), GCC (MSYS2).
+
+```powershell
+# Windows (PowerShell)
+.\build.ps1
+# Результат: build\bin\WinDTT-v{version}.exe
+```
+
+Или вручную:
+
+```bash
+cd go_client && go mod tidy && go build -ldflags="-s -w" -o ../wdtt-client.exe . && cd ..
+cd server_src && GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../assets/server/wdtt-server . && cd ..
+go mod tidy && wails build -ldflags "-s -w"
+```
+
+CI: автоматически при изменении `AppVersion` в `app.go`.
+
+## Структура
+
+```
+proxy-turn-vk-windows/
+├── app.go               ← backend: туннель, деплой, конфиг
+├── proxy.go             ← SOCKS5 + HTTP прокси, WireGuard netstack
+├── system_proxy.go      ← системный прокси (WinINET)
+├── syscall_windows.go   ← WinINET: реестр + InternetSetOption
+├── syscall_unix.go      ← заглушки для кросс-компиляции
+├── main.go              ← точка входа, go:embed
+├── build.ps1            ← скрипт сборки (Windows)
+├── go_client/           ← движок (автосинк)
+├── server_src/          ← серверная часть (автосинк)
+└── frontend/            ← HTML + CSS + JS
+```
+
+## Зависимости
+
+| Пакет | Назначение |
+|-------|-----------|
+| `github.com/wailsapp/wails/v2` | GUI framework |
+| `golang.org/x/crypto/ssh` | SSH деплой |
+| `golang.org/x/sys/windows/registry` | Системный прокси |
+| `golang.zx2c4.com/wireguard` | WireGuard userspace |
+| `gvisor.dev/gvisor` | Userspace TCP/IP стек |
+
+## Лицензия
+
+GPL-3.0

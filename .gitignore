@@ -1,0 +1,8 @@
+# Бинарники (собираются build.ps1 / CI из go_client/ и server_src/)
+build/bin/
+wdtt-client.exe
+assets/server/wdtt-server
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,70 @@
+name: Sync from upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch upstream
+        run: |
+          git clone --depth=1 \
+            https://github.com/amurcanov/proxy-turn-vk-android.git upstream
+
+      - name: Sync go_client
+        run: |
+          rm -rf go_client
+          cp -r upstream/go_client ./go_client
+
+      - name: Sync server_src
+        run: |
+          mkdir -p server_src
+          cp upstream/server.go  server_src/server.go
+          cp upstream/go.mod     server_src/go.mod
+          # go.sum может отсутствовать — копируем если есть
+          cp upstream/go.sum     server_src/go.sum 2>/dev/null || true
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet go_client/ server_src/ \
+            && echo "changed=false" >> $GITHUB_OUTPUT \
+            || echo "changed=true"  >> $GITHUB_OUTPUT
+
+      - name: Get upstream version
+        id: ver
+        run: |
+          cd upstream
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+          SHA=$(git rev-parse --short HEAD)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Create pull request if changed
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync/upstream-${{ steps.ver.outputs.sha }}
+          title: "sync: upstream amurcanov ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
+          body: |
+            Автоматический синк из upstream репозитория.
+
+            **Перед мержем обязательно проверьте изменения вручную.**
+
+            Обновлено:
+            - `go_client/` — туннельный движок
+            - `server_src/` — серверная часть (server.go + go.mod)
+
+            - Upstream: `amurcanov/proxy-turn-vk-android`
+            - Версия: `${{ steps.ver.outputs.tag }}` (`${{ steps.ver.outputs.sha }}`)
+          commit-message: "sync: upstream ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
+          delete-branch: true
