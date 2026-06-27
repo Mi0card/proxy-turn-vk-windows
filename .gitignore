@@ -3,6 +3,9 @@ build/bin/
 wdtt-client.exe
 assets/server/wdtt-server
 
+# Upstream clone (sync.yml)
+upstream/
+
 # IDE
 .idea/
 .vscode/

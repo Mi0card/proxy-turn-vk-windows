@@ -8,6 +8,9 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -47,6 +50,9 @@ jobs:
           SHA=$(git rev-parse --short HEAD)
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Cleanup upstream clone
+        run: rm -rf upstream
 
       - name: Create pull request if changed
         if: steps.diff.outputs.changed == 'true'
