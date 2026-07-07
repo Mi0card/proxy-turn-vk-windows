@@ -40,6 +40,7 @@ const (
 	vkCallsFailureDecode  vkCallsFailureKind = "decode"
 	vkCallsFailureVKAPI   vkCallsFailureKind = "vk_api"
 	vkCallsFailureCaptcha vkCallsFailureKind = "captcha"
+	vkCallsFailureCall    vkCallsFailureKind = "call_unavailable"
 	vkCallsFailureOKCDN   vkCallsFailureKind = "okcdn_api"
 	vkCallsFailureParse   vkCallsFailureKind = "parse"
 )
@@ -86,6 +87,9 @@ func describeVKCallsFailure(err error) string {
 }
 
 func vkCallsAPIErrorKind(err error) vkCallsFailureKind {
+	if _, ok := asCallUnavailableError(err); ok {
+		return vkCallsFailureCall
+	}
 	var captchaErr *VkCaptchaError
 	if errors.As(err, &captchaErr) {
 		return vkCallsFailureCaptcha
@@ -206,6 +210,8 @@ func getVKCredsViaVKCallsPath(ctx context.Context, link string, streamID int) (s
 	if apiErr := vkCallsAPIError(resp2); apiErr != nil {
 		if captchaErr, ok := apiErr.(*VkCaptchaError); ok {
 			log.Printf("[STREAM %d] [VKCalls] step2 captcha gate appeared (sid=%q, redirect_uri=%t)", streamID, captchaErr.CaptchaSid, captchaErr.RedirectURI != "")
+		} else if callErr, ok := asCallUnavailableError(apiErr); ok {
+			log.Printf("[STREAM %d] [VKCalls] step2 non-retryable call error: %v", streamID, callErr)
 		}
 		return "", "", nil, newVKCallsFailure(step2, vkCallsAPIErrorKind(apiErr), apiErr)
 	}
@@ -233,6 +239,8 @@ func getVKCredsViaVKCallsPath(ctx context.Context, link string, streamID int) (s
 	if apiErr := vkCallsAPIError(resp3); apiErr != nil {
 		if captchaErr, ok := apiErr.(*VkCaptchaError); ok {
 			log.Printf("[STREAM %d] [VKCalls] step3 captcha gate appeared (sid=%q, redirect_uri=%t)", streamID, captchaErr.CaptchaSid, captchaErr.RedirectURI != "")
+		} else if callErr, ok := asCallUnavailableError(apiErr); ok {
+			log.Printf("[STREAM %d] [VKCalls] step3 non-retryable call error: %v", streamID, callErr)
 		}
 		return "", "", nil, newVKCallsFailure(step3, vkCallsAPIErrorKind(apiErr), apiErr)
 	}
@@ -354,6 +362,9 @@ func vkCallsAPIError(resp map[string]interface{}) error {
 	msg, _ := errObj["error_msg"].(string)
 	if code == 0 && msg == "" {
 		return nil
+	}
+	if callErr := fatalCallError(resp); callErr != nil {
+		return callErr
 	}
 	if int(code) == 14 {
 		if errJSON, err := json.Marshal(errObj); err == nil {
