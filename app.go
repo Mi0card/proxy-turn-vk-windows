@@ -145,6 +145,12 @@ func extractClientExe(data []byte) (string, error) {
 		os.Remove(tmpFile.Name())
 		return "", err
 	}
+	// На Windows это no-op (там нет exec-бита), на macOS/Linux — обязательно,
+	// иначе exec.Command() падает с "permission denied".
+	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
 	return tmpFile.Name(), nil
 }
 

@@ -64,6 +64,12 @@ func (a *App) SystemProxyStatus() bool {
 	return a.sysProxyOn.Load()
 }
 
+// SystemProxySupported сообщает фронтенду, доступна ли фича системного прокси
+// на текущей ОС (только Windows — WinINET/реестр).
+func (a *App) SystemProxySupported() bool {
+	return sysProxySupported()
+}
+
 // SystemProxyEnable включает системный HTTP-прокси через WinINET.
 // Поднимает отдельный HTTP-прокси без аутентификации на случайном порту
 // и направляет WinINET на него.

@@ -15,6 +15,9 @@ func sysProcAttr() *syscall.SysProcAttr {
 
 var errSysProxyUnsupported = errors.New("system proxy поддерживается только на Windows")
 
+// sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
+func sysProxySupported() bool { return false }
+
 func inetNotify()                                       {}
 func sysProxyRead() (sysProxySnapshot, error)           { return sysProxySnapshot{}, errSysProxyUnsupported }
 func sysProxyApplyStatic(server, override string) error { return errSysProxyUnsupported }

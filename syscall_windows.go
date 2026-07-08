@@ -15,6 +15,9 @@ func sysProcAttr() *syscall.SysProcAttr {
 	}
 }
 
+// sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
+func sysProxySupported() bool { return true }
+
 // ── WinINET system proxy ─────────────────────────────────────────────────────
 
 const inetSettingsPath = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`

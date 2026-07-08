@@ -188,3 +188,115 @@ jobs:
           name: WinDTT-v${{ needs.check-version.outputs.version }}-windows
           path: build/bin/WinDTT-v${{ needs.check-version.outputs.version }}.exe
           retention-days: 7
+
+  build-macos:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+          key: go-mod-darwin-${{ hashFiles('go.mod', 'go_client/go.mod', 'server_src/go.mod') }}
+          restore-keys: go-mod-darwin-
+
+      - name: Cache Wails CLI
+        id: cache-wails
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin/wails
+          key: darwin-wails-cli-v2-go1.24
+
+      - name: Install Wails CLI
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      # go:embed требует, чтобы файлы существовали на момент go mod tidy —
+      # содержимое неважно, ниже оно перезаписывается настоящими бинарниками.
+      - name: Ensure embed stubs exist
+        run: |
+          if [ ! -f "wdtt-client.exe" ]; then
+            printf '\xCF\xFA\xED\xFE' > wdtt-client.exe
+          fi
+          if [ ! -f "assets/server/wdtt-server" ]; then
+            mkdir -p assets/server
+            printf '\x7F\x45\x4C\x46' > assets/server/wdtt-server
+          fi
+
+      - name: Install dependencies
+        run: go mod tidy
+
+      # ── Кэш бинарников (пропускаем пересборку, если исходники не менялись) ──
+      - name: Cache wdtt-server binary
+        id: cache-server-mac
+        uses: actions/cache@v5
+        with:
+          path: assets/server/wdtt-server
+          key: wdtt-server-darwin-${{ hashFiles('server_src/**') }}
+
+      - name: Cache wdtt-client binary
+        id: cache-client-mac
+        uses: actions/cache@v5
+        with:
+          path: wdtt-client.exe
+          key: wdtt-client-darwin-${{ hashFiles('go_client/**') }}
+
+      # Собираем wdtt-server (Linux amd64, чистый Go — CGO не нужен)
+      - name: Build wdtt-server
+        if: steps.cache-server-mac.outputs.cache-hit != 'true'
+        working-directory: server_src
+        run: |
+          rm -f ../assets/server/wdtt-server
+          go mod tidy
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../assets/server/wdtt-server .
+
+      # Собираем wdtt-client — нативный Mach-O бинарник (хост = macOS)
+      - name: Build wdtt-client
+        if: steps.cache-client-mac.outputs.cache-hit != 'true'
+        working-directory: go_client
+        run: |
+          rm -f ../wdtt-client.exe
+          go mod tidy
+          go build -ldflags="-s -w" -o ../wdtt-client.exe .
+
+      - name: Build WinDTT with Wails (universal)
+        run: |
+          wails build \
+            -platform darwin/universal \
+            -ldflags "-s -w"
+
+      # ── Подпись (ad-hoc, бесплатная) ─────────────────────────────────────────
+      # Без Apple Developer ID нотаризация недоступна — Gatekeeper всё равно
+      # предупредит при первом запуске скачанного .app (см. README).
+      # Ad-hoc подпись обязательна хотя бы для того, чтобы .app вообще
+      # запускался на Apple Silicon.
+      - name: Sign (ad-hoc)
+        working-directory: build/bin
+        run: |
+          codesign --force --deep --sign - "WinDTT.app"
+          codesign --verify --verbose "WinDTT.app"
+
+      - name: Package .app into .zip (ditto сохраняет bundle-структуру)
+        working-directory: build/bin
+        run: |
+          ditto -c -k --keepParent "WinDTT.app" "WinDTT-v${{ needs.check-version.outputs.version }}-macos.zip"
+
+      - name: Upload
+        uses: actions/upload-artifact@v5
+        with:
+          name: WinDTT-v${{ needs.check-version.outputs.version }}-macos
+          path: build/bin/WinDTT-v${{ needs.check-version.outputs.version }}-macos.zip
+          retention-days: 7
