@@ -8,5 +8,12 @@
   "frontend:dev:serverUrl": "",
   "author": {
     "name": "WinDTT Project"
+  },
+  "info": {
+    "companyName": "WinDTT Project",
+    "productName": "WinDTT",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright.........",
+    "comments": "Built using Wails (https://wails.io)"
   }
 }

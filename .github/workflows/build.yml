@@ -156,6 +156,13 @@ jobs:
           go mod tidy
           go build -ldflags="-s -w" -o ../wdtt-client.exe .
 
+      - name: Set app version in wails.json
+        shell: bash
+        run: |
+          jq --arg v "${{ needs.check-version.outputs.version }}" \
+             '.info.productVersion = $v' wails.json > wails.tmp.json
+          mv wails.tmp.json wails.json
+
       - name: Build WinDTT with Wails
         run: |
           wails build `
@@ -271,6 +278,13 @@ jobs:
           rm -f ../wdtt-client.exe
           go mod tidy
           go build -ldflags="-s -w" -o ../wdtt-client.exe .
+
+      - name: Set app version in wails.json
+        shell: bash
+        run: |
+          jq --arg v "${{ needs.check-version.outputs.version }}" \
+             '.info.productVersion = $v' wails.json > wails.tmp.json
+          mv wails.tmp.json wails.json
 
       - name: Build WinDTT with Wails (universal)
         run: |
