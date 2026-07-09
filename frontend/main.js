@@ -20,6 +20,12 @@ const state = {
 
 window.addEventListener('load', async () => {
   initTheme();
+
+  const sysProxySupported = await window.go.main.App.SystemProxySupported();
+  if (!sysProxySupported) {
+    const row = document.getElementById('sysproxy-row');
+    if (row) row.style.display = 'none';
+  }
   // Вкладки
   document.querySelectorAll('.tab').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));

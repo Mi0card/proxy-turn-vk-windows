@@ -25,7 +25,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.1.1.1"
+const AppVersion = "0.2.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -142,6 +142,12 @@ func extractClientExe(data []byte) (string, error) {
 	}
 	defer tmpFile.Close()
 	if _, err := tmpFile.Write(data); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+	// На Windows это no-op (там нет exec-бита), на macOS/Linux — обязательно,
+	// иначе exec.Command() падает с "permission denied".
+	if err := os.Chmod(tmpFile.Name(), 0o755); err != nil {
 		os.Remove(tmpFile.Name())
 		return "", err
 	}

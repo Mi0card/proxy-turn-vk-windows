@@ -1,6 +1,6 @@
 # WinDTT
 
-Windows GUI-клиент для туннеля [WireGuard over VK TURN](https://github.com/amurcanov/proxy-turn-vk-android).
+Windows и macOS GUI-клиент для туннеля [WireGuard over VK TURN](https://github.com/amurcanov/proxy-turn-vk-android).
 
 Движок (`go_client`, `server_src`) — из репо [amurcanov/proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android), синхронизируется автоматически.
 GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
@@ -49,6 +49,24 @@ go mod tidy && wails build -ldflags "-s -w"
 ```
 
 CI: автоматически при изменении `AppVersion` в `app.go`.
+
+## macOS
+
+Готовая сборка (`.app`) — на странице **Releases**.
+
+**Gatekeeper при первом запуске.** Скачанный `.app` помечается атрибутом карантина — macOS покажет "приложение повреждено" или заблокирует запуск. Перед первым запуском одно из двух:
+```bash
+xattr -cr WinDTT.app
+```
+либо в Finder: правый клик по `WinDTT.app` → **Открыть** (не двойной клик) → подтвердить в диалоге.
+
+Сборка подписана ad-hoc (без Apple Developer ID) — полноценной нотаризации нет, предупреждение Gatekeeper это не убирает, только описанный выше шаг.
+
+**Системный прокси недоступен.** На Windows чекбокс "Системный прокси" автоматически редиректит трафик браузера/Office через WinINET/реестр — на macOS такого API в приложении нет, чекбокс скрыт. Доступны SOCKS5 (`127.0.0.1:1080`) и HTTP (`127.0.0.1:1081`) прокси — их нужно прописать вручную: System Settings → Network → выбрать сеть → Details → Proxies, либо через терминал:
+```bash
+networksetup -setsocksfirewallproxy Wi-Fi 127.0.0.1 1080
+```
+(порты — see UI приложения, могут отличаться от дефолтных).
 
 ## Структура
 
