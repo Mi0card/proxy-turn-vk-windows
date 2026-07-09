@@ -473,7 +473,8 @@ async function deploy() {
     return;
   }
 
-  const confirmed = confirm(
+  const confirmed = await window.go.main.App.ConfirmDialog(
+    'Подтверждение подключения',
     `Подключение к ${ip}\n\nSHA-256 fingerprint хост-ключа:\n${fp.fingerprint}\n\nЭто ваш сервер? Подключиться?`
   );
   if (!confirmed) { deployLog('Деплой отменён.', 'warn'); return; }
@@ -503,12 +504,15 @@ async function undeploy() {
     deployLog('Fingerprint не сохранён — получаю с сервера...', 'info');
     const fp = await window.go.main.App.DeployGetFingerprint(ip, port);
     if (!fp.ok) { deployLog('Не удалось получить fingerprint: ' + (fp.error || ''), 'error'); return; }
-    const ok = confirm(`SHA-256 fingerprint:\n${fp.fingerprint}\n\nЭто ваш сервер?`);
+    const ok = await window.go.main.App.ConfirmDialog(
+      'Подтверждение',
+      `SHA-256 fingerprint:\n${fp.fingerprint}\n\nЭто ваш сервер?`
+    );
     if (!ok) { deployLog('Удаление отменено.', 'warn'); return; }
     fingerprint = fp.fingerprint;
   }
 
-  const confirmed = confirm(`Удалить wdtt-server с ${ip}?`);
+  const confirmed = await window.go.main.App.ConfirmDialog('Подтверждение', `Удалить wdtt-server с ${ip}?`);
   if (!confirmed) return;
 
   clearDeployLog();

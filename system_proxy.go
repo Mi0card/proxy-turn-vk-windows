@@ -59,6 +59,21 @@ func (a *App) clearSysProxyBackup() {
 
 // ── Публичное API (вызывается из фронтенда через Wails) ──────────────────────
 
+// ConfirmDialog показывает нативный OK/Cancel-диалог через рантайм Wails.
+// Используется вместо JS confirm() — тот не работает в WKWebView на macOS
+// (WebKit не реализует confirm()/alert()/prompt() без явного WKUIDelegate).
+func (a *App) ConfirmDialog(title, message string) bool {
+	btn, _ := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         title,
+		Message:       message,
+		Buttons:       []string{"OK", "Отмена"},
+		DefaultButton: "OK",
+		CancelButton:  "Отмена",
+	})
+	return btn == "OK" || btn == "Yes"
+}
+
 // SystemProxyStatus возвращает текущее состояние перенаправления.
 func (a *App) SystemProxyStatus() bool {
 	return a.sysProxyOn.Load()
