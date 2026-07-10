@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-// CaptchaResultChan — канал для получения токена капчи из внешнего решателя (WebView)
 var CaptchaResultChan = make(chan string, 1)
 
 var captchaModeValue atomic.Value
@@ -73,7 +72,6 @@ func getVKAuthMode() string {
 	return mode
 }
 
-// drainCaptchaResult удаляет устаревший результат капчи из канала
 func drainCaptchaResult() {
 	select {
 	case <-CaptchaResultChan:
@@ -89,7 +87,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Сигналы
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -110,7 +107,6 @@ func main() {
 
 	var pauseFlag int32
 
-	// STDIN для PAUSE/RESUME/STOP и CAPTCHA_RESULT
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -158,6 +154,7 @@ func main() {
 	captchaMode := flag.String("captcha-mode", "auto", "режим обхода капчи (auto/wv/rjs)")
 	fingerprint := flag.String("fingerprint", "chrome", "браузерный фингерпринт (chrome, safari, ios, android, firefox)")
 	clientIdsFlag := flag.String("client-ids", "", "ID клиентов VK через запятую")
+	obfsMode := flag.String("obfs", "audio", "режим обфускации (audio/video)")
 
 	flag.Parse()
 	activeVKAuthMode := setVKAuthMode(*vkAuthMode)
@@ -197,13 +194,11 @@ func main() {
 		log.Fatal("[КЛИЕНТ] Нужен -password: WRAP ключ теперь выводится из пароля подключения")
 	}
 
-	// WRAP key
 	wrapKey, err := deriveWrapKey(*connPassword)
 	if err != nil {
 		log.Fatalf("[КЛИЕНТ] WRAP key derive: %v", err)
 	}
 
-	// Лимит воркеров
 	maxWorkers := 108
 	if *numW > maxWorkers {
 		*numW = maxWorkers
@@ -214,13 +209,13 @@ func main() {
 	*numW = (*numW / workersPerGroup) * workersPerGroup
 
 	tp := &TurnParams{
-		Host:    *host,
-		Port:    *port,
-		Hashes:  hashes,
-		WrapKey: wrapKey,
+		Host:     *host,
+		Port:     *port,
+		Hashes:   hashes,
+		WrapKey:  wrapKey,
+		ObfsMode: *obfsMode,
 	}
 
-	// Слушаем локально с ожиданием (если старый процесс еще не убит Parent Watcher'ом)
 	var localConn net.PacketConn
 	actualListenAddr := *listen
 	for i := 0; i < 5; i++ {
@@ -324,6 +319,7 @@ func main() {
 			} else {
 				log.Println("[КОНФИГ] Сохранён в wg-turn.conf")
 			}
+			emitConfig(finalConf)
 		case <-ctx.Done():
 		}
 	}()
@@ -331,21 +327,29 @@ func main() {
 	var wg sync.WaitGroup
 	workerIDCounter := 1
 
-	var prevWaitReady <-chan struct{}
+	var prevWaitCreds <-chan struct{}
+	var prevWaitSpawn <-chan struct{}
 
 	for g := 0; g < numGroups; g++ {
 		isFirst := (g == 0)
 
-		var myWaitReady <-chan struct{}
-		var mySignalReady chan<- struct{}
+		var myWaitCreds <-chan struct{}
+		var mySignalCreds chan<- struct{}
+		var myWaitSpawn <-chan struct{}
+		var mySignalSpawn chan<- struct{}
 
 		if g > 0 {
-			myWaitReady = prevWaitReady
+			myWaitCreds = prevWaitCreds
+			myWaitSpawn = prevWaitSpawn
 		}
 		if g < numGroups-1 {
-			ch := make(chan struct{})
-			mySignalReady = ch
-			prevWaitReady = ch
+			chC := make(chan struct{})
+			mySignalCreds = chC
+			prevWaitCreds = chC
+
+			chS := make(chan struct{})
+			mySignalSpawn = chS
+			prevWaitSpawn = chS
 		}
 
 		ids := make([]int, workersPerGroup)
@@ -361,11 +365,11 @@ func main() {
 		}
 
 		wg.Add(1)
-		go func(groupID int, isFirstGroup bool, configChan chan<- string, workerIds []int, startHashIndex int, waitR <-chan struct{}, sigR chan<- struct{}) {
+		go func(groupID int, isFirstGroup bool, configChan chan<- string, workerIds []int, startHashIndex int, waitC, waitS <-chan struct{}, sigC, sigS chan<- struct{}) {
 			defer wg.Done()
 			WorkerGroup(ctx, groupID, startHashIndex, tp, peer, disp, localPort,
-				isFirstGroup, configChan, workerIds, &pauseFlag, *deviceID, *connPassword, stats, waitR, sigR)
-		}(gID, isFirst, cc, ids, g, myWaitReady, mySignalReady)
+				isFirstGroup, configChan, workerIds, &pauseFlag, *deviceID, *connPassword, stats, waitC, sigC, waitS, sigS)
+		}(gID, isFirst, cc, ids, g, myWaitCreds, myWaitSpawn, mySignalCreds, mySignalSpawn)
 	}
 
 	wg.Wait()

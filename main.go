@@ -26,6 +26,13 @@ var clientExeData []byte
 //go:embed assets/server/wdtt-server
 var serverBinaryData []byte
 
+// deploy.sh — установочный скрипт для VPS, зеркалируется из upstream
+// через sync.yml. Раньше качался с raw.githubusercontent.com на каждый
+// клик Deploy/Удалить — теперь встроен, деплой не зависит от сети в моменте.
+//
+//go:embed assets/deploy.sh
+var deployScriptData []byte
+
 func main() {
 	// Распаковываем wdtt-client.exe во временный файл
 	tmpExe, err := extractClientExe(clientExeData)
@@ -35,6 +42,7 @@ func main() {
 
 	app := NewAppWithExe(tmpExe)
 	app.serverBinary = serverBinaryData
+	app.deployScript = deployScriptData
 
 	wailsErr := wails.Run(&options.App{
 		Title:     "WinDTT  v" + AppVersion,

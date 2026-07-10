@@ -34,9 +34,9 @@
 <nav class="tabs">
   <button class="tab active" data-tab="connect">Подключение</button>
   <button class="tab" data-tab="proxy">Proxy</button>
-  <button class="tab" data-tab="deploy">Deploy</button>
-  <button class="tab" data-tab="wg">WireGuard</button>
   <button class="tab" data-tab="logs">Логи</button>
+  <button class="tab" data-tab="wg">WireGuard</button>
+  <button class="tab" data-tab="deploy">Deploy</button>
   <button class="tab" data-tab="help">Справка</button>
 </nav>
 
@@ -67,11 +67,11 @@
         <button class="btn btn-sm" onclick="addVkHash()" title="Добавить хеш" style="margin-left:4px;margin-top:1px">+</button>
       </div>
       <div class="field-row">
-        <label>Фингерпринт</label>
+        <label>Fingerprint</label>
         <select id="fingerprint" class="sel">
-          <option value="chrome">chrome (по умолчанию)</option>
+          <option value="firefox">firefox (по умолчанию)</option>
+          <option value="chrome">chrome</option>
           <option value="safari">safari</option>
-          <option value="firefox">firefox</option>
           <option value="ios">ios</option>
           <option value="android">android</option>
         </select>
@@ -89,8 +89,8 @@
       </div>
       <div class="field-row">
         <label>Потоков &nbsp;(-n)</label>
-        <input id="n-workers" type="number" class="inp inp-sm" value="24" min="1" max="108">
-        <span class="hint">кратно 12, макс 108</span>
+        <input id="n-workers" type="number" class="inp inp-sm" value="9" min="1" max="108">
+        <span class="hint">кратно 9, макс 108</span>
       </div>
       <div class="field-row">
         <label>Listen &nbsp;(-listen)</label>
@@ -102,6 +102,13 @@
           <option value="auto">auto</option>
           <option value="rjs">rjs</option>
           <option value="wv">wv</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>Маскировка &nbsp;(-obfs)</label>
+        <select id="obfs-mode" class="sel">
+          <option value="audio">audio (по умолчанию)</option>
+          <option value="video">video</option>
         </select>
       </div>
     </div>

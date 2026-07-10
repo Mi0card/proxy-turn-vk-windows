@@ -112,6 +112,11 @@ function loadConfig(cfg) {
     for (let o of cm.options) if (o.value === cfg.captcha_mode) o.selected = true;
   }
 
+  const om = document.getElementById('obfs-mode');
+  if (cfg.obfs_mode && om) {
+    for (let o of om.options) if (o.value === cfg.obfs_mode) o.selected = true;
+  }
+
   // px_use_auth: undefined → оставляем HTML-дефолт (checked)
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
@@ -122,12 +127,13 @@ function loadConfig(cfg) {
 function collectConfig() {
   return {
     vk:           getVkHashes(),
-    fingerprint:  document.getElementById('fingerprint')?.value || 'chrome',
+    fingerprint:  document.getElementById('fingerprint')?.value || 'firefox',
     srv:          getVal('srv'),
     sec:          getVal('sec'),
-    n:            getVal('n-workers') || '24',
+    n:            getVal('n-workers') || '9',
     listen:       getVal('listen') || '127.0.0.1:9000',
     captcha_mode: document.getElementById('captcha-mode').value,
+    obfs_mode:    document.getElementById('obfs-mode')?.value || 'audio',
     device_id:    '',   // заполнится на Go-стороне
     px_host:      getVal('px-host') || '127.0.0.1',
     px_socks_port: getVal('px-port') || '1080',
@@ -165,10 +171,11 @@ async function connect() {
   const vk  = getVkHashes();
   const srv = getVal('srv').trim();
   const sec = getVal('sec').trim();
-  const n   = getVal('n-workers').trim() || '24';
+  const n   = getVal('n-workers').trim() || '9';
   const lst = getVal('listen').trim()    || '127.0.0.1:9000';
   const cm  = document.getElementById('captcha-mode').value;
-  const fp  = document.getElementById('fingerprint')?.value || 'chrome';
+  const fp  = document.getElementById('fingerprint')?.value || 'firefox';
+  const om  = document.getElementById('obfs-mode')?.value || 'audio';
 
   if (!vk)  { log('Введите VK хеш!',    'error'); return; }
   if (!srv) { log('Введите адрес VPS!', 'error'); return; }
@@ -185,7 +192,7 @@ async function connect() {
   let deviceID = cfg.device_id || '';
 
   log('Подключение → ' + srv, 'info');
-  const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, fp);
+  const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, fp, om);
   if (err) { log('Ошибка: ' + err, 'error'); return; }
   await saveConfig();
 }
@@ -831,5 +838,6 @@ WIREGUARD
   -n    24            потоков (кратно 12, макс 108)
   -listen 127.0.0.1:9000
   -fingerprint chrome/safari/firefox/ios/android
-  -captcha-mode auto/rjs/wv`;
+  -captcha-mode auto/rjs/wv
+  -obfs audio/video   тип маскировки трафика`;
 }

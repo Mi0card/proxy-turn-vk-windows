@@ -25,7 +25,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.1"
+const AppVersion = "0.2.3.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ type Config struct {
 	N           string `json:"n"`
 	Listen      string `json:"listen"`
 	CaptchaMode  string `json:"captcha_mode"`
+	ObfsMode     string `json:"obfs_mode"`
 	Fingerprint  string `json:"fingerprint"`
 	DeviceID     string `json:"device_id"`
 	PxHost      string `json:"px_host"`
@@ -66,7 +67,7 @@ type WorkerStats struct {
 
 // tunnelParams хранит параметры запуска туннеля для автоперезапуска
 type tunnelParams struct {
-	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint string
+	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode string
 }
 
 type App struct {
@@ -78,6 +79,7 @@ type App struct {
 	configFile        string
 	overrideClientExe string
 	serverBinary      []byte // встроенный wdtt-server (Linux amd64)
+	deployScript      []byte // встроенный deploy.sh
 
 	// Туннель
 	tunnelMu      sync.Mutex
@@ -481,7 +483,7 @@ func generateUUID() string {
 }
 
 func (a *App) TunnelStart(
-	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint string,
+	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode string,
 ) string {
 	a.tunnelMu.Lock()
 	defer a.tunnelMu.Unlock()
@@ -520,6 +522,9 @@ func (a *App) TunnelStart(
 	if fingerprint != "" && fingerprint != "chrome" {
 		args = append(args, "-fingerprint", fingerprint)
 	}
+	if obfsMode != "" && obfsMode != "audio" {
+		args = append(args, "-obfs", obfsMode)
+	}
 
 	cmd := exec.Command(a.clientExe, args...)
 	cmd.Dir = filepath.Dir(a.clientExe) // wg-turn.conf создаётся в этой папке
@@ -549,7 +554,7 @@ func (a *App) TunnelStart(
 	a.pingStop = make(chan struct{})
 	go a.pingLoop(a.pingStop)
 	// Сохраняем параметры для автоперезапуска
-	a.lastTunnelParams = &tunnelParams{vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint}
+	a.lastTunnelParams = &tunnelParams{vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode}
 	a.procStartedAt = time.Now().UnixMilli()
 	a.lastActiveAt = 0
 	a.floodCount = 0
@@ -952,7 +957,7 @@ func (a *App) restartTunnel() {
 
 	// Перезапускаем с теми же параметрами
 	if err := a.TunnelStart(params.vk, params.srv, params.sec, params.n,
-		params.listen, params.captchaMode, params.deviceID, params.fingerprint); err != "" {
+		params.listen, params.captchaMode, params.deviceID, params.fingerprint, params.obfsMode); err != "" {
 		a.log("✗ Ошибка перезапуска: "+err, "error")
 	}
 }
@@ -1090,9 +1095,6 @@ func (a *App) SocksStats() SocksStatsResult {
 
 
 // ── Deploy API ────────────────────────────────────────────────────────────────
-
-const serverURLTemplate = "https://github.com/amurcanov/proxy-turn-vk-android/releases/latest/download/wdtt-server-linux-%s"
-const deployScriptURL  = "https://raw.githubusercontent.com/amurcanov/proxy-turn-vk-android/main/app/src/main/assets/deploy.sh"
 
 type FingerprintResult struct {
 	OK          bool   `json:"ok"`
@@ -1252,20 +1254,12 @@ func (a *App) DeployRun(ip, port, user, pwd, wgPort, wdttPort, tunnelPwd, adminI
 	// ── Шаг 3: Загружаем файлы на VPS ───────────────────────────────────────
 	a.deployLog("[3/4] Загружаю файлы на VPS...", "info")
 
-	// Скачиваем deploy.sh
-	a.deployLog("      Скачиваю deploy.sh...", "dim")
-	scriptResp, scriptErr := http.Get(deployScriptURL)
-	if scriptErr != nil || scriptResp.StatusCode != 200 {
-		if scriptErr != nil {
-			fail("Загрузка deploy.sh: " + scriptErr.Error())
-		} else {
-			scriptResp.Body.Close()
-			fail(fmt.Sprintf("HTTP %d при загрузке deploy.sh", scriptResp.StatusCode))
-		}
+	// Берём встроенный deploy.sh — сеть наружу для этого больше не нужна
+	if len(a.deployScript) < 64 {
+		fail("Встроенный deploy.sh не найден — пересоберите приложение")
 		return
 	}
-	scriptData, _ := io.ReadAll(scriptResp.Body)
-	scriptResp.Body.Close()
+	scriptData := a.deployScript
 
 	if !uploadData(serverData, "/tmp/wdtt-server") {
 		return
@@ -1373,14 +1367,12 @@ func (a *App) UndeployRun(ip, port, user, pwd, wgPort, wdttPort, fingerprint str
 	defer client.Close()
 	a.deployLog("      ✔ Подключено.", "success")
 
-	// Скачиваем deploy.sh
-	scriptResp, scriptErr := http.Get(deployScriptURL)
-	if scriptErr != nil || scriptResp.StatusCode != 200 {
-		a.deployLog("      ✗ Не удалось загрузить deploy.sh", "error")
+	// Берём встроенный deploy.sh — сеть наружу для этого больше не нужна
+	if len(a.deployScript) < 64 {
+		a.deployLog("      ✗ Встроенный deploy.sh не найден — пересоберите приложение", "error")
 		return
 	}
-	scriptData, _ := io.ReadAll(scriptResp.Body)
-	scriptResp.Body.Close()
+	scriptData := a.deployScript
 
 	sess, _ := client.NewSession()
 	sess.Stdin = strings.NewReader(string(scriptData))

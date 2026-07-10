@@ -25,20 +25,22 @@ jobs:
       - name: Sync go_client
         run: |
           rm -rf go_client
-          cp -r upstream/go_client ./go_client
+          cp -r upstream/app/src/main/assets/android-client ./go_client
 
       - name: Sync server_src
         run: |
-          mkdir -p server_src
-          cp upstream/server.go  server_src/server.go
-          cp upstream/go.mod     server_src/go.mod
-          # go.sum может отсутствовать — копируем если есть
-          cp upstream/go.sum     server_src/go.sum 2>/dev/null || true
+          rm -rf server_src
+          cp -r upstream/app/src/main/assets/linux-server ./server_src
+
+      - name: Sync deploy.sh
+        run: |
+          mkdir -p assets
+          cp upstream/app/src/main/assets/deploy.sh ./assets/deploy.sh
 
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet go_client/ server_src/ \
+          git diff --quiet go_client/ server_src/ assets/deploy.sh \
             && echo "changed=false" >> $GITHUB_OUTPUT \
             || echo "changed=true"  >> $GITHUB_OUTPUT
 
@@ -67,8 +69,9 @@ jobs:
             **Перед мержем обязательно проверьте изменения вручную.**
 
             Обновлено:
-            - `go_client/` — туннельный движок
-            - `server_src/` — серверная часть (server.go + go.mod)
+            - `go_client/` — туннельный движок (`app/src/main/assets/android-client`)
+            - `server_src/` — серверная часть (`app/src/main/assets/linux-server`)
+            - `assets/deploy.sh` — установочный скрипт VPS
 
             - Upstream: `amurcanov/proxy-turn-vk-android`
             - Версия: `${{ steps.ver.outputs.tag }}` (`${{ steps.ver.outputs.sha }}`)
