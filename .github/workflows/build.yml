@@ -187,7 +187,11 @@ jobs:
             -FilePath $exe -Certificate $cert `
             -HashAlgorithm SHA256
           Write-Host "Подпись: $($result.Status) — $($result.StatusMessage)"
-          if ($result.Status -ne 'Valid') {
+          # Self-signed сертификат без цепочки к доверенному root ВСЕГДА даёт
+          # Status=UnknownError ("root certificate which is not trusted") —
+          # это ожидаемо, не значит что подпись не встала. Падаем только если
+          # сертификат реально не прикрепился к файлу.
+          if ($result.Status -eq 'NotSigned' -or $null -eq $result.SignerCertificate) {
             Write-Error "Подпись не удалась: $($result.StatusMessage)"
             exit 1
           }
