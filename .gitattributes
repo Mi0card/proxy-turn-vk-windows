@@ -1,0 +1,5 @@
+# deploy.sh выполняется на Linux VPS через bash — CRLF ломает исполнение
+# (invalid option name, $'\r': command not found и т.п.). Форсируем LF
+# независимо от платформы чекаута/git core.autocrlf на CI-раннере.
+*.sh text eol=lf
+assets/deploy.sh text eol=lf

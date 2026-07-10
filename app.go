@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.3.3"
+const AppVersion = "0.2.3.4"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1259,7 +1260,7 @@ func (a *App) DeployRun(ip, port, user, pwd, wgPort, wdttPort, tunnelPwd, adminI
 		fail("Встроенный deploy.sh не найден — пересоберите приложение")
 		return
 	}
-	scriptData := a.deployScript
+	scriptData := bytes.ReplaceAll(a.deployScript, []byte("\r\n"), []byte("\n")) // страховка от CRLF на случай кривого checkout
 
 	if !uploadData(serverData, "/tmp/wdtt-server") {
 		return
@@ -1372,7 +1373,7 @@ func (a *App) UndeployRun(ip, port, user, pwd, wgPort, wdttPort, fingerprint str
 		a.deployLog("      ✗ Встроенный deploy.sh не найден — пересоберите приложение", "error")
 		return
 	}
-	scriptData := a.deployScript
+	scriptData := bytes.ReplaceAll(a.deployScript, []byte("\r\n"), []byte("\n")) // страховка от CRLF на случай кривого checkout
 
 	sess, _ := client.NewSession()
 	sess.Stdin = strings.NewReader(string(scriptData))
