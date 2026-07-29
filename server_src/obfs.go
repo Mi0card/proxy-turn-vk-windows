@@ -1,8 +1,7 @@
-
-
 package main
 
 import (
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -12,8 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"crypto/cipher"
 
 	"golang.org/x/crypto/chacha20poly1305"
 
@@ -26,21 +23,32 @@ const (
 	wrapKeyLen   = 32
 )
 
-var aeadCache sync.Map
+var (
+	aeadCacheMu sync.RWMutex
+	aeadCache   = make(map[string]cipher.AEAD)
+)
 
 func getAEAD(key []byte) (cipher.AEAD, error) {
 	if len(key) != wrapKeyLen {
 		return nil, fmt.Errorf("obfs: key must be %d bytes", wrapKeyLen)
 	}
 	keyStr := string(key)
-	if val, ok := aeadCache.Load(keyStr); ok {
-		return val.(cipher.AEAD), nil
+
+	aeadCacheMu.RLock()
+	if aead, ok := aeadCache[keyStr]; ok {
+		aeadCacheMu.RUnlock()
+		return aead, nil
 	}
+	aeadCacheMu.RUnlock()
+
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
 		return nil, err
 	}
-	aeadCache.Store(keyStr, aead)
+
+	aeadCacheMu.Lock()
+	aeadCache[keyStr] = aead
+	aeadCacheMu.Unlock()
 	return aead, nil
 }
 
@@ -51,15 +59,14 @@ type ObfsConfig struct {
 }
 
 type ObfsState struct {
-	mu      sync.Mutex
 	initSeq uint16
 	initTs  uint32
-	count   uint64
+	count   uint64 // Поле обновляется атомарно через sync/atomic
 }
 
 func NewObfsConfig() *ObfsConfig {
 	var buf [4]byte
-	rand.Read(buf[:])
+	_, _ = rand.Read(buf[:])
 	return &ObfsConfig{
 		SSRC:        binary.BigEndian.Uint32(buf[:]),
 		PayloadType: 111,
@@ -69,7 +76,7 @@ func NewObfsConfig() *ObfsConfig {
 
 func NewObfsState() *ObfsState {
 	var buf [6]byte
-	rand.Read(buf[:])
+	_, _ = rand.Read(buf[:])
 	return &ObfsState{
 		initSeq: binary.BigEndian.Uint16(buf[0:2]),
 		initTs:  binary.BigEndian.Uint32(buf[2:6]),
@@ -105,19 +112,22 @@ func obfsWrapPacketInto(dst []byte, aead cipher.AEAD, payload []byte, cfg *ObfsC
 	if len(payload) == 0 {
 		return 0, errors.New("obfs: empty payload")
 	}
-	state.mu.Lock()
-	c := state.count
-	state.count++
-	state.mu.Unlock()
 
+	c := atomic.AddUint64(&state.count, 1) - 1
 	seq := state.initSeq + uint16(c)
 	ts := state.initTs + uint32(c)*960 + uint32(c>>16)
 
 	padRand := 0
+	x := uint64(0)
 	if cfg.PaddingMax > 0 {
-		var rndBuf [1]byte
-		rand.Read(rndBuf[:])
-		padRand = int(rndBuf[0]) % cfg.PaddingMax
+		// Встроенная (inline) логика перемешивания для исключения вызова функции
+		x = (c + 0x9e3779b97f4a7c15) ^ 0xbf58476d1ce4e5b9
+		x ^= x >> 30
+		x *= 0xbf58476d1ce4e5b9
+		x ^= x >> 27
+		x *= 0x94d049bb133111eb
+		x ^= x >> 31
+		padRand = int(x % uint64(cfg.PaddingMax))
 	}
 	padTotal := padRand + 1
 	outLen := 12 + len(payload) + chacha20poly1305.Overhead + padTotal
@@ -135,8 +145,11 @@ func obfsWrapPacketInto(dst []byte, aead cipher.AEAD, payload []byte, cfg *ObfsC
 	obfsBuildNonceInto(&nonce, cfg.SSRC, seq, ts)
 	sealed := aead.Seal(dst[12:12], nonce[:], payload, dst[:12])
 	padStart := 12 + len(sealed)
+
 	if padRand > 0 {
-		rand.Read(dst[padStart : padStart+padRand])
+		for i := 0; i < padRand; i++ {
+			dst[padStart+i] = byte(x >> ((i % 8) * 8))
+		}
 	}
 	dst[outLen-1] = byte(padTotal)
 	return outLen, nil
@@ -249,82 +262,81 @@ type wrapPacketConn struct {
 	inner     net.PacketConn
 	keys      *wrapKeyStore
 	key       []byte
-	aead      cipher.AEAD 
+	aead      cipher.AEAD
 	selected  int32
 	authLog   int32
 	obfsCfg   *ObfsConfig
 	obfsWrite *ObfsState
 
-	
-	
-	
-	
 	rxMu  sync.Mutex
-	rxBuf []byte
 	txMu  sync.Mutex
 	txBuf []byte
 }
 
 func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
-	c.rxMu.Lock()
-	defer c.rxMu.Unlock()
-
-	
-	need := len(p) + 80
-	if cap(c.rxBuf) < need {
-		c.rxBuf = make([]byte, need)
-	}
-	buf := c.rxBuf[:need]
-
+	var buf [2048]byte
 	var n int
 	var addr net.Addr
 	var err error
-	var raw []byte
 
+	// Чтение из сокета на локальный стек-буфер без использования пулов
 	for {
-		n, addr, err = c.inner.ReadFrom(buf)
+		n, addr, err = c.inner.ReadFrom(buf[:])
 		if err != nil {
 			return 0, addr, err
 		}
-		raw = buf[:n]
-
-		
-		if len(raw) > 0 && (raw[0] == 0x00 || raw[0] == 0x16) {
-			continue 
+		if n > 0 && (buf[0] == 0x00 || buf[0] == 0x16) {
+			continue
 		}
 		break
 	}
 
-	if atomic.LoadInt32(&c.selected) == 0 {
-		key, m, uErr := c.keys.Unwrap(raw, p)
+	raw := buf[:n]
+
+	// Быстрый путь (Fast path) без захвата мьютекса для последующих пакетов
+	if atomic.LoadInt32(&c.selected) == 1 {
+		m, uErr := obfsUnwrapPacketAEAD(c.aead, raw, p)
 		if uErr != nil {
-			if atomic.CompareAndSwapInt32(&c.authLog, 0, 1) {
-				log.Printf("[WRAP] Отказ: RTP AEAD auth failed from %s (keys=%d)", addr.String(), c.keys.Count())
-			}
-			return 0, addr, uErr
-		}
-		aead, aErr := getAEAD(key)
-		if aErr != nil {
-			return 0, addr, fmt.Errorf("wrap: cipher init: %w", aErr)
-		}
-		c.key = key
-		c.aead = aead
-		c.obfsCfg = NewObfsConfig()
-		
-		if len(raw) > 1 {
-			c.obfsCfg.PayloadType = raw[1] & 0x7F
-		}
-		c.obfsWrite = NewObfsState()
-		atomic.StoreInt32(&c.selected, 1)
-		if atomic.CompareAndSwapInt32(&c.authLog, 0, 1) {
-			log.Printf("[WRAP] OK: ключ выбран для %s (keys=%d), PT=%d", addr.String(), c.keys.Count(), c.obfsCfg.PayloadType)
+			return 0, addr, fmt.Errorf("obfs unwrap: %w", uErr)
 		}
 		return m, addr, nil
 	}
 
-	m, uErr := obfsUnwrapPacketAEAD(c.aead, raw, p)
+	// Медленный путь (Slow path) с мьютексом только для первого пакета
+	c.rxMu.Lock()
+	defer c.rxMu.Unlock()
+
+	// Двойная проверка состояния под блокировкой
+	if atomic.LoadInt32(&c.selected) == 1 {
+		m, uErr := obfsUnwrapPacketAEAD(c.aead, raw, p)
+		if uErr != nil {
+			return 0, addr, fmt.Errorf("obfs unwrap: %w", uErr)
+		}
+		return m, addr, nil
+	}
+
+	key, m, uErr := c.keys.Unwrap(raw, p)
 	if uErr != nil {
-		return 0, addr, fmt.Errorf("obfs unwrap: %w", uErr)
+		if atomic.CompareAndSwapInt32(&c.authLog, 0, 1) {
+			log.Printf("[WRAP] Отказ: RTP AEAD auth failed from %s (keys=%d)", addr.String(), c.keys.Count())
+		}
+		return 0, addr, uErr
+	}
+	aead, aErr := getAEAD(key)
+	if aErr != nil {
+		return 0, addr, fmt.Errorf("wrap: cipher init: %w", aErr)
+	}
+	c.key = key
+	c.aead = aead
+	c.obfsCfg = NewObfsConfig()
+
+	if len(raw) > 1 {
+		c.obfsCfg.PayloadType = raw[1] & 0x7F
+	}
+	c.obfsWrite = NewObfsState()
+	atomic.StoreInt32(&c.selected, 1)
+	if atomic.CompareAndSwapInt32(&c.authLog, 0, 1) {
+		log.Printf("[WRAP] OK: ключ выбран для %s (keys=%d), PT=%d", addr.String(), c.keys.Count(), c.obfsCfg.PayloadType)
 	}
 	return m, addr, nil
 }
