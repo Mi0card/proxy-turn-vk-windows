@@ -381,18 +381,18 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	buf := make([]byte, 2)
 	if _, err := io.ReadFull(c, buf); err != nil || buf[0] != 5 { return }
 	methods := make([]byte, int(buf[1]))
-	io.ReadFull(c, methods)
+	if _, err := io.ReadFull(c, methods); err != nil { return }
 
 	if useAuth {
 		c.Write([]byte{5, 2})
 		hdr := make([]byte, 2)
 		if _, err := io.ReadFull(c, hdr); err != nil || hdr[0] != 1 { return }
 		uname := make([]byte, int(hdr[1]))
-		io.ReadFull(c, uname)
+		if _, err := io.ReadFull(c, uname); err != nil { return }
 		plen := make([]byte, 1)
-		io.ReadFull(c, plen)
+		if _, err := io.ReadFull(c, plen); err != nil { return }
 		pwd := make([]byte, int(plen[0]))
-		io.ReadFull(c, pwd)
+		if _, err := io.ReadFull(c, pwd); err != nil { return }
 		if string(uname) != user || string(pwd) != pass {
 			c.Write([]byte{1, 1})
 			p.log("→ SOCKS5 авторизация отклонена", "warn")
@@ -413,17 +413,17 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	switch req[3] {
 	case 1:
 		ip := make([]byte, 4)
-		io.ReadFull(c, ip)
+		if _, err := io.ReadFull(c, ip); err != nil { return }
 		host = net.IP(ip).String()
 	case 3:
 		dlen := make([]byte, 1)
-		io.ReadFull(c, dlen)
+		if _, err := io.ReadFull(c, dlen); err != nil { return }
 		domain := make([]byte, int(dlen[0]))
-		io.ReadFull(c, domain)
+		if _, err := io.ReadFull(c, domain); err != nil { return }
 		host = string(domain)
 	case 4:
 		ip := make([]byte, 16)
-		io.ReadFull(c, ip)
+		if _, err := io.ReadFull(c, ip); err != nil { return }
 		host = "[" + net.IP(ip).String() + "]"
 	default:
 		c.Write([]byte{5, 8, 0, 1, 0, 0, 0, 0, 0, 0})
@@ -431,7 +431,7 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	}
 
 	portBuf := make([]byte, 2)
-	io.ReadFull(c, portBuf)
+	if _, err := io.ReadFull(c, portBuf); err != nil { return }
 	target := fmt.Sprintf("%s:%d", host, binary.BigEndian.Uint16(portBuf))
 
 	c.SetDeadline(time.Time{})

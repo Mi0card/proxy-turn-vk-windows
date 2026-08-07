@@ -16,6 +16,34 @@ const state = {
   totalWorkers:   0,
 };
 
+// ── Toast (баннер ошибок вне вкладки Логи) ───────────────────────────────────
+
+function showToast(msg, lv = 'error') {
+  const box = document.getElementById('toast-box');
+  if (!box) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + lv;
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => el.classList.add('toast-out'), 4000);
+  setTimeout(() => el.remove(), 4400);
+}
+
+// ── Busy-состояние кнопок (индикатор длительной операции) ────────────────────
+
+function setBusy(btn, busy, busyText) {
+  if (!btn) return;
+  if (busy) {
+    btn.dataset.label = btn.dataset.label || btn.textContent;
+    btn.textContent = busyText || '…';
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+  } else {
+    if (btn.dataset.label) btn.textContent = btn.dataset.label;
+    btn.classList.remove('is-busy');
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 window.addEventListener('load', async () => {
@@ -187,39 +215,69 @@ async function connect() {
     return h.includes('/') ? h.split('/').pop() : h;
   }).filter(Boolean).join(',');
 
-  // device_id генерируется на Go стороне при первом запуске
-  const cfg = await window.go.main.App.GetConfig();
-  let deviceID = cfg.device_id || '';
+  const btn = document.getElementById('btn-connect');
+  setBusy(btn, true, '…  Подключение');
+  try {
+    // device_id генерируется на Go стороне при первом запуске
+    const cfg = await window.go.main.App.GetConfig();
+    const deviceID = cfg.device_id || '';
 
-  log('Подключение → ' + srv, 'info');
-  const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, fp, om);
-  if (err) { log('Ошибка: ' + err, 'error'); return; }
-  await saveConfig();
-}
-
-function pauseResume() {
-  if (state.tunnelPaused) {
-    window.go.main.App.TunnelResume();
-    log('Туннель возобновлён.', 'info');
-  } else {
-    window.go.main.App.TunnelPause();
-    log('Туннель на паузе.', 'warn');
+    log('Подключение → ' + srv, 'info');
+    const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, fp, om);
+    if (err) {
+      log('Ошибка: ' + err, 'error');
+      showToast('Не удалось подключиться: ' + err);
+      btn.disabled = false;
+      return;
+    }
+    await saveConfig();
+  } catch (e) {
+    log('Ошибка: ' + e, 'error');
+    showToast('Не удалось подключиться: ' + e);
+    btn.disabled = false;
+  } finally {
+    setBusy(btn, false);
   }
 }
 
-function stop() {
-  window.go.main.App.TunnelStop();
-  document.getElementById('captcha-panel').style.display = 'none';
-  log('Туннель остановлен.', 'warn');
+async function pauseResume() {
+  try {
+    if (state.tunnelPaused) {
+      await window.go.main.App.TunnelResume();
+      log('Туннель возобновлён.', 'info');
+    } else {
+      await window.go.main.App.TunnelPause();
+      log('Туннель на паузе.', 'warn');
+    }
+  } catch (e) {
+    log('Ошибка: ' + e, 'error');
+    showToast('Не удалось переключить паузу: ' + e);
+  }
 }
 
-function sendCaptcha() {
+async function stop() {
+  try {
+    await window.go.main.App.TunnelStop();
+    document.getElementById('captcha-panel').style.display = 'none';
+    log('Туннель остановлен.', 'warn');
+  } catch (e) {
+    log('Ошибка остановки: ' + e, 'error');
+    showToast('Не удалось остановить туннель: ' + e);
+  }
+}
+
+async function sendCaptcha() {
   const token = getVal('captcha-token').trim();
   if (!token) { log('Вставьте токен капчи!', 'error'); return; }
-  window.go.main.App.TunnelSendCaptcha(token);
-  setVal('captcha-token', '');
-  document.getElementById('captcha-panel').style.display = 'none';
-  log('Токен капчи отправлен.', 'info');
+  try {
+    await window.go.main.App.TunnelSendCaptcha(token);
+    setVal('captcha-token', '');
+    document.getElementById('captcha-panel').style.display = 'none';
+    log('Токен капчи отправлен.', 'info');
+  } catch (e) {
+    log('Ошибка отправки капчи: ' + e, 'error');
+    showToast('Не удалось отправить токен капчи: ' + e);
+  }
 }
 
 // ── Tunnel events ─────────────────────────────────────────────────────────────
@@ -298,53 +356,68 @@ async function proxyStart() {
   if (s5port === httpPort) { log('SOCKS5 и HTTP порты должны быть разными!', 'error'); return; }
   if (ua && !u) { log('Введите логин!', 'error'); return; }
 
-  // Блокируем кнопку сразу — разблокируем только при ошибке
-  document.getElementById('btn-pstart').disabled = true;
+  const btn = document.getElementById('btn-pstart');
+  setBusy(btn, true, '…  Запуск');
+  try {
+    const err = await window.go.main.App.ProxyStart(host, s5port, httpPort, u, pw, ua);
+    if (err) {
+      socksLog('Ошибка запуска: ' + err, 'error');
+      showToast('Прокси: ' + err);
+      btn.disabled = false;
+      return;
+    }
 
-  const err = await window.go.main.App.ProxyStart(host, s5port, httpPort, u, pw, ua);
-  if (err) {
-    socksLog('Ошибка запуска: ' + err, 'error');
-    document.getElementById('btn-pstart').disabled = false;
-    return;
+    document.getElementById('btn-pstop').disabled = false;
+
+    const via = state.tunnelRunning ? ' (через туннель)' : '';
+    let hint = `SOCKS5: ${host}:${s5port}${via}\nHTTP:   ${host}:${httpPort}${via}`;
+    if (ua) hint += `\nЛогин: ${u}`;
+    const hintEl = document.getElementById('proxy-hint');
+    hintEl.textContent = hint;
+    hintEl.style.display = '';
+
+    await saveConfig();
+  } catch (e) {
+    socksLog('Ошибка запуска: ' + e, 'error');
+    showToast('Прокси: ' + e);
+    btn.disabled = false;
+  } finally {
+    setBusy(btn, false);
   }
-
-  document.getElementById('btn-pstop').disabled = false;
-
-  const via = state.tunnelRunning ? ' (через туннель)' : '';
-  let hint = `SOCKS5: ${host}:${s5port}${via}\nHTTP:   ${host}:${httpPort}${via}`;
-  if (ua) hint += `\nЛогин: ${u}`;
-  const hintEl = document.getElementById('proxy-hint');
-  hintEl.textContent = hint;
-  hintEl.style.display = '';
-
-  await saveConfig();
 }
 
-// Псевдоним
-const socksStart = proxyStart;
-
-function proxyStop() {
-  window.go.main.App.SocksStop();
-  document.getElementById('btn-pstart').disabled = false;
-  document.getElementById('btn-pstop').disabled  = true;
-  document.getElementById('proxy-hint').style.display = 'none';
+async function proxyStop() {
+  try {
+    await window.go.main.App.SocksStop();
+  } catch (e) {
+    socksLog('Ошибка остановки: ' + e, 'error');
+    showToast('Не удалось остановить прокси: ' + e);
+  } finally {
+    document.getElementById('btn-pstart').disabled = false;
+    document.getElementById('btn-pstop').disabled  = true;
+    document.getElementById('proxy-hint').style.display = 'none';
+  }
 }
-
-const socksStop = proxyStop;
 
 // ── System Proxy UI ──────────────────────────────────────────────────────────
 
 async function onSysProxyToggle() {
   const cb = document.getElementById('px-sysproxy');
-
-  if (cb.checked) {
-    const sErr = await window.go.main.App.SystemProxyEnable();
-    if (sErr) {
-      socksLog('System proxy: ' + sErr, 'error');
-      cb.checked = false;
+  try {
+    if (cb.checked) {
+      const sErr = await window.go.main.App.SystemProxyEnable();
+      if (sErr) {
+        socksLog('System proxy: ' + sErr, 'error');
+        showToast('Системный прокси: ' + sErr);
+        cb.checked = false;
+      }
+    } else {
+      await window.go.main.App.SystemProxyDisable();
     }
-  } else {
-    await window.go.main.App.SystemProxyDisable();
+  } catch (e) {
+    socksLog('System proxy: ' + e, 'error');
+    showToast('Системный прокси: ' + e);
+    cb.checked = false;
   }
 }
 
@@ -473,25 +546,36 @@ async function deploy() {
 
   if (!ip || !user) { deployLog('Введите IP и пользователя!', 'error'); return; }
 
-  deployLog('Получаю fingerprint ' + ip + ':' + port + '...', 'info');
-  const fp = await window.go.main.App.DeployGetFingerprint(ip, port);
-  if (!fp.ok) {
-    deployLog('Не удалось получить fingerprint: ' + (fp.error || ''), 'error');
-    return;
+  const btn = document.getElementById('btn-deploy');
+  try {
+    deployLog('Получаю fingerprint ' + ip + ':' + port + '...', 'info');
+    const fp = await window.go.main.App.DeployGetFingerprint(ip, port);
+    if (!fp.ok) {
+      deployLog('Не удалось получить fingerprint: ' + (fp.error || ''), 'error');
+      showToast('Deploy: не удалось получить fingerprint');
+      return;
+    }
+
+    const confirmed = await window.go.main.App.ConfirmDialog(
+      'Подтверждение подключения',
+      `Подключение к ${ip}\n\nSHA-256 fingerprint хост-ключа:\n${fp.fingerprint}\n\nЭто ваш сервер? Подключиться?`
+    );
+    if (!confirmed) { deployLog('Деплой отменён.', 'warn'); return; }
+
+    clearDeployLog();
+    const tunnelPwd = getVal('d-tunnel-pwd') || '';
+    if (!tunnelPwd) { deployLog('Укажите пароль туннеля!', 'error'); return; }
+    const adminID   = getVal('d-admin-id')   || '';
+    const botToken  = getVal('d-bot-token')  || '';
+
+    setBusy(btn, true, '…  Деплой');
+    await window.go.main.App.DeployRun(ip, port, user, pwd, wg, wdtt, tunnelPwd, adminID, botToken, fp.fingerprint);
+  } catch (e) {
+    deployLog('Ошибка деплоя: ' + e, 'error');
+    showToast('Deploy: ' + e);
+  } finally {
+    setBusy(btn, false);
   }
-
-  const confirmed = await window.go.main.App.ConfirmDialog(
-    'Подтверждение подключения',
-    `Подключение к ${ip}\n\nSHA-256 fingerprint хост-ключа:\n${fp.fingerprint}\n\nЭто ваш сервер? Подключиться?`
-  );
-  if (!confirmed) { deployLog('Деплой отменён.', 'warn'); return; }
-
-  clearDeployLog();
-  const tunnelPwd = getVal('d-tunnel-pwd') || '';
-  if (!tunnelPwd) { deployLog('Укажите пароль туннеля!', 'error'); return; }
-  const adminID   = getVal('d-admin-id')   || '';
-  const botToken  = getVal('d-bot-token')  || '';
-  window.go.main.App.DeployRun(ip, port, user, pwd, wg, wdtt, tunnelPwd, adminID, botToken, fp.fingerprint);
 }
 
 async function undeploy() {
@@ -504,26 +588,39 @@ async function undeploy() {
 
   if (!ip || !user) { deployLog('Введите IP и пользователя!', 'error'); return; }
 
-  // Fingerprint: берём сохранённый, или запрашиваем заново.
-  const cfg = await window.go.main.App.GetConfig();
-  let fingerprint = (cfg && cfg.fingerprint) || '';
-  if (!fingerprint) {
-    deployLog('Fingerprint не сохранён — получаю с сервера...', 'info');
-    const fp = await window.go.main.App.DeployGetFingerprint(ip, port);
-    if (!fp.ok) { deployLog('Не удалось получить fingerprint: ' + (fp.error || ''), 'error'); return; }
-    const ok = await window.go.main.App.ConfirmDialog(
-      'Подтверждение',
-      `SHA-256 fingerprint:\n${fp.fingerprint}\n\nЭто ваш сервер?`
-    );
-    if (!ok) { deployLog('Удаление отменено.', 'warn'); return; }
-    fingerprint = fp.fingerprint;
+  const btn = document.getElementById('btn-undeploy');
+  try {
+    // Fingerprint: берём сохранённый, или запрашиваем заново.
+    const cfg = await window.go.main.App.GetConfig();
+    let fingerprint = (cfg && cfg.fingerprint) || '';
+    if (!fingerprint) {
+      deployLog('Fingerprint не сохранён — получаю с сервера...', 'info');
+      const fp = await window.go.main.App.DeployGetFingerprint(ip, port);
+      if (!fp.ok) {
+        deployLog('Не удалось получить fingerprint: ' + (fp.error || ''), 'error');
+        showToast('Undeploy: не удалось получить fingerprint');
+        return;
+      }
+      const ok = await window.go.main.App.ConfirmDialog(
+        'Подтверждение',
+        `SHA-256 fingerprint:\n${fp.fingerprint}\n\nЭто ваш сервер?`
+      );
+      if (!ok) { deployLog('Удаление отменено.', 'warn'); return; }
+      fingerprint = fp.fingerprint;
+    }
+
+    const confirmed = await window.go.main.App.ConfirmDialog('Подтверждение', `Удалить wdtt-server с ${ip}?`);
+    if (!confirmed) return;
+
+    clearDeployLog();
+    setBusy(btn, true, '…  Удаление');
+    await window.go.main.App.UndeployRun(ip, port, user, pwd, wg, wdtt, fingerprint);
+  } catch (e) {
+    deployLog('Ошибка удаления: ' + e, 'error');
+    showToast('Undeploy: ' + e);
+  } finally {
+    setBusy(btn, false);
   }
-
-  const confirmed = await window.go.main.App.ConfirmDialog('Подтверждение', `Удалить wdtt-server с ${ip}?`);
-  if (!confirmed) return;
-
-  clearDeployLog();
-  window.go.main.App.UndeployRun(ip, port, user, pwd, wg, wdtt, fingerprint);
 }
 
 // ── WireGuard ─────────────────────────────────────────────────────────────────
@@ -627,7 +724,10 @@ function clearLog() {
 
 async function initTheme() {
   const saved = await window.go.main.App.GetTheme();
-  applyTheme(saved || 'dark');
+  if (saved) { applyTheme(saved); return; }
+  // Тема ещё не выбрана — берём предпочтение ОС.
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(prefersLight ? 'light' : 'dark');
 }
 
 function applyTheme(theme) {
@@ -657,8 +757,8 @@ function addVkHash() {
   row.className = 'vk-hash-row';
   row.innerHTML = `
     <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
-    <button class="btn btn-sm" onclick="pasteVkHash(this)">📋</button>
-    <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)">✕</button>
+    <button class="btn btn-sm" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">📋</button>
+    <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" title="Удалить" aria-label="Удалить хеш">✕</button>
   `;
   list.appendChild(row);
   updateRemoveButtons();
@@ -702,9 +802,11 @@ function setVkHashes(hashStr) {
     inp.value = h; // прямое присвоение — безопасно, не экранирует символы хеша
     const btnP = document.createElement('button');
     btnP.className = 'btn btn-sm'; btnP.textContent = '📋';
+    btnP.title = 'Вставить'; btnP.setAttribute('aria-label', 'Вставить хеш из буфера обмена');
     btnP.onclick = function() { pasteVkHash(this); };
     const btnR = document.createElement('button');
     btnR.className = 'btn btn-sm vk-remove'; btnR.textContent = '✕';
+    btnR.title = 'Удалить'; btnR.setAttribute('aria-label', 'Удалить хеш');
     btnR.onclick = function() { removeVkHash(this); };
     row.appendChild(inp); row.appendChild(btnP); row.appendChild(btnR);
     list.appendChild(row);

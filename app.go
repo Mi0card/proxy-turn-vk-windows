@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.3.4"
+const AppVersion = "0.2.4.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -111,9 +111,10 @@ type App struct {
 	closeAllowed atomic.Bool
 
 	// Системный прокси (WinINET)
+	sysProxyMu  sync.Mutex // защищает sysProxyLn/sysProxySrv от гонки Enable/Disable
 	sysProxyOn  atomic.Bool
-	sysProxyLn  net.Listener   // отдельный HTTP-прокси без auth
-	sysProxySrv *http.Server   // для graceful close
+	sysProxyLn  net.Listener // отдельный HTTP-прокси без auth
+	sysProxySrv *http.Server // для graceful close
 
 	// Прокси (SOCKS5 + HTTP)
 	proxy         *ProxyServer
@@ -311,10 +312,9 @@ func (a *App) GetVersion() string {
 	return AppVersion
 }
 
+// GetTheme возвращает сохранённую тему, либо "" если пользователь ещё
+// не выбирал — фронтенд в этом случае определяет тему по prefers-color-scheme ОС.
 func (a *App) GetTheme() string {
-	if a.cfg.Theme == "" {
-		return "light"
-	}
 	return a.cfg.Theme
 }
 
@@ -594,7 +594,7 @@ func (a *App) TunnelStart(
 	go func() {
 		streamsWG.Wait()
 		cmd.Wait()
-		a.finalizeTunnel(startTs)
+		a.finalizeTunnel(cmd, startTs)
 	}()
 
 	return ""
@@ -746,10 +746,13 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 }
 
 // finalizeTunnel выполняется один раз при завершении процесса туннеля
-// (guard через a.tunnelRunning). Освобождает ресурсы и снимает системный прокси.
-func (a *App) finalizeTunnel(startTs time.Time) {
+// (guard через a.tunnelRunning и идентичность proc). Освобождает ресурсы и
+// снимает системный прокси. Сверка proc с a.tunnelProc защищает от гонки с
+// restartTunnel: если пока читались завершающиеся пайпы старого процесса
+// watchdog уже запустил новый, эта финализация не должна затирать его состояние.
+func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
 	a.tunnelMu.Lock()
-	if !a.tunnelRunning { // уже финализировано (watchdog/повторный вызов)
+	if !a.tunnelRunning || a.tunnelProc != proc { // уже финализировано или это уже другой (перезапущенный) процесс
 		a.tunnelMu.Unlock()
 		return
 	}
@@ -954,7 +957,13 @@ func (a *App) restartTunnel() {
 	a.tunnelRunning = false
 	a.tunnelProc = nil
 	a.tunnelStdin = nil
+	ps := a.pingStop
+	a.pingStop = nil
+	a.watchdogStop = nil // текущий watchdog — это мы сами, сейчас вернёмся сами
 	a.tunnelMu.Unlock()
+	if ps != nil {
+		close(ps) // останавливаем pingLoop старого процесса, иначе он утечёт
+	}
 
 	// Перезапускаем с теми же параметрами
 	if err := a.TunnelStart(params.vk, params.srv, params.sec, params.n,
@@ -1375,7 +1384,11 @@ func (a *App) UndeployRun(ip, port, user, pwd, wgPort, wdttPort, fingerprint str
 	}
 	scriptData := bytes.ReplaceAll(a.deployScript, []byte("\r\n"), []byte("\n")) // страховка от CRLF на случай кривого checkout
 
-	sess, _ := client.NewSession()
+	sess, err := client.NewSession()
+	if err != nil {
+		a.deployLog("      ✗ SSH-сессия: "+err.Error(), "error")
+		return
+	}
 	sess.Stdin = strings.NewReader(string(scriptData))
 	sess.Run("cat > /tmp/deploy.sh")
 	sess.Close()

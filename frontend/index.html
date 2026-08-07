@@ -8,6 +8,8 @@
 </head>
 <body>
 
+<div id="toast-box" class="toast-box" role="status" aria-live="polite"></div>
+
 <!-- ── Топ-бар ── -->
 <header class="topbar">
   <div class="topbar-row1">
@@ -19,7 +21,7 @@
       <span id="traffic-badge" class="badge hidden"></span>
       <span id="workers-badge" class="badge hidden"></span>
       <span id="status-badge" class="badge disconnected"><span class="dot"></span> Туннель выкл</span>
-      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Переключить тему">🌙</button>
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">🌙</button>
     </div>
   </div>
   <div class="topbar-row2" id="sysproxy-row">
@@ -49,22 +51,22 @@
       <div class="card-title">Быстрая вставка wdtt:// ссылки</div>
       <div class="row-flex">
         <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
-        <button class="btn btn-sm" onclick="pasteInput('wlink')">📋</button>
+        <button class="btn btn-sm" onclick="pasteInput('wlink')" title="Вставить" aria-label="Вставить ссылку из буфера обмена">📋</button>
         <button class="btn btn-primary btn-sm" onclick="parseWdtt()">Разобрать</button>
       </div>
     </div>
 
     <div class="fields">
-      <div class="field-row" style="align-items:flex-start">
-        <label style="padding-top:6px">VK хеш &nbsp;(-vk)</label>
-        <div id="vk-list" style="flex:1;display:flex;flex-direction:column;gap:4px">
+      <div class="field-row field-row--top">
+        <label class="label--top">VK хеш &nbsp;(-vk)</label>
+        <div id="vk-list" class="vk-list">
           <div class="vk-hash-row">
             <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
-            <button class="btn btn-sm" onclick="pasteVkHash(this)">📋</button>
-            <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" style="display:none">✕</button>
+            <button class="btn btn-sm" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">📋</button>
+            <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" style="display:none" title="Удалить" aria-label="Удалить хеш">✕</button>
           </div>
         </div>
-        <button class="btn btn-sm" onclick="addVkHash()" title="Добавить хеш" style="margin-left:4px;margin-top:1px">+</button>
+        <button class="btn btn-sm btn-add-hash" onclick="addVkHash()" title="Добавить хеш" aria-label="Добавить хеш">+</button>
       </div>
       <div class="field-row">
         <label>Fingerprint</label>
@@ -79,13 +81,13 @@
       <div class="field-row">
         <label>VPS адрес:порт &nbsp;(-peer)</label>
         <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
-        <button class="btn btn-sm" onclick="pasteInput('srv')">📋</button>
+        <button class="btn btn-sm" onclick="pasteInput('srv')" title="Вставить" aria-label="Вставить адрес из буфера обмена">📋</button>
       </div>
       <div class="field-row">
         <label>Secret &nbsp;(-password)</label>
         <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
         <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
-        <button class="btn btn-sm" onclick="pasteInput('sec')">📋</button>
+        <button class="btn btn-sm" onclick="pasteInput('sec')" title="Вставить" aria-label="Вставить secret из буфера обмена">📋</button>
       </div>
       <div class="field-row">
         <label>Потоков &nbsp;(-n)</label>
@@ -121,11 +123,11 @@
       <button id="btn-stop"    class="btn btn-stop"    onclick="stop()" disabled>■  Стоп</button>
     </div>
 
-    <div id="captcha-panel" class="card" style="display:none;margin-top:8px">
+    <div id="captcha-panel" class="card card--mt" style="display:none">
       <div class="warn-text">⚠ Требуется капча — вставьте токен:</div>
       <div class="row-flex">
         <input id="captcha-token" type="text" class="inp mono" placeholder="токен капчи">
-        <button class="btn btn-sm" onclick="pasteInput('captcha-token')">📋</button>
+        <button class="btn btn-sm" onclick="pasteInput('captcha-token')" title="Вставить" aria-label="Вставить токен капчи из буфера обмена">📋</button>
         <button class="btn btn-primary btn-sm" onclick="sendCaptcha()">Отправить</button>
       </div>
     </div>
@@ -168,7 +170,7 @@
         <label>Пароль</label>
         <input id="px-pass" type="password" class="inp inp-md">
         <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
-        <button class="btn btn-sm" title="Сгенерировать" onclick="genPass()">🎲</button>
+        <button class="btn btn-sm" title="Сгенерировать" aria-label="Сгенерировать пароль" onclick="genPass()">🎲</button>
       </div>
     </div>
 
@@ -218,19 +220,19 @@
           <div class="field-row">
             <label>Пароль туннеля</label>
             <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
-            <button class="btn btn-sm" onclick="genDeployPass()" title="Сгенерировать">🎲</button>
+            <button class="btn btn-sm" onclick="genDeployPass()" title="Сгенерировать" aria-label="Сгенерировать пароль туннеля">🎲</button>
           </div>
         </div>
 
         <div class="btn-row">
-          <button class="btn btn-primary" onclick="deploy()">🚀  Установить wdtt-server</button>
-          <button class="btn btn-stop" onclick="undeploy()">🗑  Удалить</button>
+          <button id="btn-deploy" class="btn btn-primary" onclick="deploy()">🚀  Установить wdtt-server</button>
+          <button id="btn-undeploy" class="btn btn-stop" onclick="undeploy()">🗑  Удалить</button>
         </div>
-        <p class="hint" style="margin-top:4px;margin-bottom:10px">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
+        <p class="hint hint--spaced">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
 
         <details class="advanced-block">
           <summary>Расширенные настройки сервера</summary>
-          <div class="fields" style="margin-top:8px">
+          <div class="fields fields--top">
 
 
             <div class="field-row">
@@ -251,7 +253,7 @@
           <span class="log-title">DEPLOY LOG</span>
           <button class="btn btn-sm" onclick="clearDeployLog()">Очистить</button>
         </div>
-        <div id="deploy-log-box" class="deploy-log-box"></div>
+        <div id="deploy-log-box" class="deploy-log-box" data-empty-text="Лог деплоя появится здесь после запуска."></div>
       </div>
 
     </div>
@@ -296,12 +298,12 @@ PersistentKeepalive = 25
           <label class="radio-label"><input type="radio" name="lf" value="error" onchange="setFilter('error')"> Error</label>
         </div>
         <div class="log-btns">
-          <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог">💾</button>
+          <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог" aria-label="Сохранить лог в файл">💾</button>
           <button class="btn btn-sm" onclick="clearLog()">Очистить</button>
         </div>
       </div>
-      <div id="log-box" class="log-box-full"></div>
-      <div id="socks-log-box" class="log-box-full" style="display:none"></div>
+      <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
+      <div id="socks-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события прокси."></div>
     </div>
   </section>
 

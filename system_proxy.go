@@ -106,25 +106,33 @@ func (a *App) SystemProxyEnable() string {
 	handler := newSysProxyHandler()
 	srv := &http.Server{Handler: handler}
 	go srv.Serve(ln)
+	a.sysProxyMu.Lock()
 	a.sysProxyLn = ln
 	a.sysProxySrv = srv
+	a.sysProxyMu.Unlock()
 
 	// Снимаем текущее состояние WinINET — для восстановления при отключении/крэше.
 	cur, err := sysProxyRead()
 	if err != nil {
 		srv.Close()
+		a.sysProxyMu.Lock()
 		a.sysProxyLn, a.sysProxySrv = nil, nil
+		a.sysProxyMu.Unlock()
 		return "чтение настроек прокси: " + err.Error()
 	}
 	if err := a.saveSysProxyBackup(cur); err != nil {
 		srv.Close()
+		a.sysProxyMu.Lock()
 		a.sysProxyLn, a.sysProxySrv = nil, nil
+		a.sysProxyMu.Unlock()
 		return "сохранение бэкапа: " + err.Error()
 	}
 
 	if err := sysProxyApplyStatic(proxyAddr, sysProxyOverride); err != nil {
 		srv.Close()
+		a.sysProxyMu.Lock()
 		a.sysProxyLn, a.sysProxySrv = nil, nil
+		a.sysProxyMu.Unlock()
 		a.clearSysProxyBackup()
 		return "применение: " + err.Error()
 	}
@@ -145,13 +153,17 @@ func (a *App) SystemProxyEnable() string {
 // Безопасно вызывать, даже если прокси не был включён (no-op).
 func (a *App) SystemProxyDisable() {
 	// Закрываем отдельный листенер системного прокси.
-	if a.sysProxySrv != nil {
-		a.sysProxySrv.Close() // прерывает все in-flight соединения
-		a.sysProxySrv = nil
+	a.sysProxyMu.Lock()
+	srv := a.sysProxySrv
+	ln := a.sysProxyLn
+	a.sysProxySrv = nil
+	a.sysProxyLn = nil
+	a.sysProxyMu.Unlock()
+	if srv != nil {
+		srv.Close() // прерывает все in-flight соединения
 	}
-	if a.sysProxyLn != nil {
-		a.sysProxyLn.Close()
-		a.sysProxyLn = nil
+	if ln != nil {
+		ln.Close()
 	}
 
 	if s, ok := a.loadSysProxyBackup(); ok {

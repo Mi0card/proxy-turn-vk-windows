@@ -103,8 +103,21 @@ body { display: flex; flex-direction: column; }
 /* Вкладки не ограничены по высоте — занимают сколько нужно,
    родительский .content скроллится при необходимости */
 .tab-panel { display: none; height: auto; }
-.tab-panel.active { display: block; }
+.tab-panel.active { display: block; animation: tab-fade .12s ease-out; }
 .tab-panel.hidden { display: none; }
+
+@keyframes tab-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Логи и Deploy заполняют оставшуюся высоту .content (flex-item с определённой
+   высотой) без завязки на calc(100vh - N) — не ломается при изменении topbar. */
+#tab-logs.active, #tab-deploy.active {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 
 /* ── Cards ── */
 .card {
@@ -125,10 +138,10 @@ body { display: flex; flex-direction: column; }
   gap: 8px;
 }
 .field-row label {
-  width: 195px;
+  flex: 0 0 195px;
+  max-width: 40%;
   text-align: right;
   color: var(--fg2);
-  flex-shrink: 0;
   font-size: 13px;
 }
 
@@ -178,8 +191,21 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
 }
 .btn:hover    { opacity: .85; }
+.btn:active:not(:disabled) { opacity: .7; transform: translateY(1px); }
 .btn:disabled { opacity: .4; cursor: default; }
+.btn.is-busy  { cursor: progress; }
 .btn-sm       { padding: 5px 11px; font-size: 12px; }
+
+/* ── Клавиатурная навигация ── */
+.btn:focus-visible,
+.tab:focus-visible,
+.log-tab:focus-visible,
+.inp:focus-visible,
+.sel:focus-visible,
+.theme-btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
 
 .btn-primary  { background: #1d4ed8; color: #fff; height: 36px; padding: 0 20px; font-size: 14px; }
 .btn-connect  { background: #16a34a; color: #fff; height: 36px; padding: 0 20px; font-size: 14px; }
@@ -250,7 +276,8 @@ body { display: flex; flex-direction: column; }
 .log-panel-inner {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 128px); /* вся высота минус topbar + tabs */
+  flex: 1;
+  min-height: 0;
 }
 
 .log-header {
@@ -288,13 +315,24 @@ body { display: flex; flex-direction: column; }
   min-height: 0;
 }
 
-/* Log levels */
+/* Log levels — цвет + иконка-дублёр (не полагаемся только на цвет) */
 .log-ts      { color: var(--dim); }
 .log-info    { color: var(--fg); }
 .log-success { color: var(--success); }
 .log-warn    { color: var(--warn); }
 .log-error   { color: var(--error); }
 .log-dim     { color: var(--dim); }
+.log-success::before { content: '✔ '; }
+.log-warn::before    { content: '⚠ '; }
+.log-error::before   { content: '✕ '; }
+
+/* Пустое состояние — пока в логе ничего нет */
+.log-box-full:empty::before,
+.deploy-log-box:empty::before {
+  content: attr(data-empty-text);
+  color: var(--dim);
+  font-style: italic;
+}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -402,6 +440,15 @@ body.light ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 }
 .vk-hash-row .vk-hash { flex: 1; min-width: 0; }
 
+/* ── Утилитарные классы (замена точечных inline style) ── */
+.field-row--top { align-items: flex-start; }
+.label--top     { padding-top: 6px; }
+.vk-list        { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.btn-add-hash   { margin-left: 4px; margin-top: 1px; }
+.hint--spaced   { margin-top: 4px; margin-bottom: 10px; }
+.fields--top    { margin-top: 8px; }
+.card--mt       { margin-top: 8px; }
+
 /* ── Расширенные настройки ── */
 .advanced-block {
   margin-top: 4px;
@@ -430,7 +477,7 @@ body.light .advanced-block { border-color: var(--bg3); }
 .deploy-layout {
   display: flex;
   gap: 12px;
-  height: calc(100vh - 128px);
+  flex: 1;
   min-height: 0;
 }
 
@@ -471,3 +518,34 @@ body.light .advanced-block { border-color: var(--bg3); }
 
 body.light .deploy-log-panel { background: #ffffff; border: 1px solid #e2e8f0; }
 body.light .deploy-log-header { border-bottom-color: #e2e8f0; }
+
+/* ── Toast / баннер ошибок ── */
+.toast-box {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg2);
+  border-left: 3px solid var(--error);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+  animation: toast-in .15s ease-out;
+}
+.toast-warn    { border-left-color: var(--warn); }
+.toast-success { border-left-color: var(--success); }
+.toast-out { animation: toast-out .35s ease-in forwards; }
+
+@keyframes toast-in  { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
+
+body.light .toast { box-shadow: 0 4px 14px rgba(0, 0, 0, .15); }

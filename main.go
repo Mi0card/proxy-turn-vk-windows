@@ -40,6 +40,10 @@ func main() {
 		tmpExe = ""
 	}
 
+	if tmpExe != "" {
+		defer os.Remove(tmpExe)
+	}
+
 	app := NewAppWithExe(tmpExe)
 	app.serverBinary = serverBinaryData
 	app.deployScript = deployScriptData
@@ -67,11 +71,6 @@ func main() {
 			Theme:                windows.Dark,
 		},
 	})
-
-	// Удаляем временный файл после закрытия
-	if tmpExe != "" {
-		os.Remove(tmpExe)
-	}
 
 	if wailsErr != nil {
 		panic(wailsErr)
