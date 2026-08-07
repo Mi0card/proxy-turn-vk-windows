@@ -19,6 +19,7 @@ GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
 - SSH деплой `wdtt-server` на VPS с проверкой fingerprint
 - Авто-загрузка WireGuard конфига, статус-бар с пингом через туннель
 - Светлая / тёмная тема
+- Ручная капча VK решается в нативном окне WebView2, без участия пользователя после прохождения проверки (Windows; на macOS — заглушка, см. `captcha_webview_other.go`)
 
 ## Системный прокси
 
@@ -93,6 +94,7 @@ proxy-turn-vk-windows/
 | `golang.org/x/sys/windows/registry` | Системный прокси |
 | `golang.zx2c4.com/wireguard` | WireGuard userspace |
 | `gvisor.dev/gvisor` | Userspace TCP/IP стек |
+| `github.com/jchv/go-webview2` | Нативное окно WebView2 для решения ручной капчи VK (Windows) |
 
 ## Лицензия
 

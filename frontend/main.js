@@ -64,6 +64,7 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('tunnel:status', onTunnelStatus);
   window.runtime.EventsOn('tunnel:workers', onWorkers);
   window.runtime.EventsOn('tunnel:captcha', onCaptcha);
+  window.runtime.EventsOn('tunnel:captcha:done', onCaptchaDone);
   window.runtime.EventsOn('socks:status', onSocksStatus);
   window.runtime.EventsOn('socks:stats', onSocksStats);
   window.runtime.EventsOn('socks:log', onSocksLog);
@@ -241,6 +242,8 @@ async function connect() {
 }
 
 async function pauseResume() {
+  const btn = document.getElementById('btn-pause');
+  btn.disabled = true;
   try {
     if (state.tunnelPaused) {
       await window.go.main.App.TunnelResume();
@@ -252,10 +255,14 @@ async function pauseResume() {
   } catch (e) {
     log('Ошибка: ' + e, 'error');
     showToast('Не удалось переключить паузу: ' + e);
+  } finally {
+    btn.disabled = false; // фактическое состояние (текст/disabled) поправит updateTunnelUI()
   }
 }
 
 async function stop() {
+  const btn = document.getElementById('btn-stop');
+  setBusy(btn, true, '…  Остановка');
   try {
     await window.go.main.App.TunnelStop();
     document.getElementById('captcha-panel').style.display = 'none';
@@ -263,6 +270,8 @@ async function stop() {
   } catch (e) {
     log('Ошибка остановки: ' + e, 'error');
     showToast('Не удалось остановить туннель: ' + e);
+  } finally {
+    setBusy(btn, false);
   }
 }
 
@@ -296,7 +305,17 @@ function onWorkers(w) {
 
 function onCaptcha(msg) {
   document.getElementById('captcha-panel').style.display = '';
-  log('Требуется капча! Вставьте токен.', 'warn');
+  if (msg === 'webview') {
+    log('Требуется капча — должно открыться отдельное окно VK. Реши её там; поле ниже — запасной вариант, если окно не появилось.', 'warn');
+    showToast('Требуется капча — открылось отдельное окно VK', 'warn');
+  } else {
+    log('Требуется капча! Вставьте токен.', 'warn');
+  }
+}
+
+function onCaptchaDone() {
+  document.getElementById('captcha-panel').style.display = 'none';
+  log('Капча обработана.', 'info');
 }
 
 function updateTunnelUI() {

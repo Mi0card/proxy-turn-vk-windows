@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.4.0"
+const AppVersion = "0.2.4.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -664,7 +664,29 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 			continue
 		}
 
-		// Капча
+		// Капча — WebView-протокол: go_client печатает CAPTCHA_SOLVE|mode|redirectURI|sessionToken
+		// и ждёт ответ CAPTCHA_RESULT|<результат> через stdin (см. go_client/vk_auth.go).
+		// На Windows решаем автоматически через нативный WebView2-попап с перехватом
+		// сети (см. captcha_webview_windows.go) — так же, как это делает апстрим
+		// Android-приложение через свой нативный WebView.
+		if strings.HasPrefix(line, "CAPTCHA_SOLVE|") {
+			parts := strings.SplitN(strings.TrimPrefix(line, "CAPTCHA_SOLVE|"), "|", 3)
+			if len(parts) < 2 || parts[1] == "" {
+				a.log("⚠  Капча: некорректный формат запроса", "warn")
+				continue
+			}
+			redirectURI := parts[1]
+			a.log("⚠  Требуется капча — открываю окно подтверждения VK...", "warn")
+			runtime.EventsEmit(a.ctx, "tunnel:captcha", "webview")
+			baseDir := a.baseDir
+			go openCaptchaWebView(redirectURI, baseDir, func(result string) {
+				a.TunnelSendCaptcha(result)
+				runtime.EventsEmit(a.ctx, "tunnel:captcha:done", nil)
+			})
+			continue
+		}
+
+		// Капча — прочие информационные строки (прогресс автоматического решения и т.п.)
 		if strings.Contains(ll, "captcha") || strings.Contains(ll, "капча") ||
 			strings.Contains(ll, "смарт") {
 			if strings.Contains(ll, "требуется") || strings.Contains(ll, "needed") ||

@@ -19,7 +19,7 @@ import (
 	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
-const maxProxyConn = 100
+const maxProxyConn = 512
 
 // ── WireGuard netstack ────────────────────────────────────────────────────────
 
