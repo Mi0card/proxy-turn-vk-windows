@@ -61,7 +61,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          branch: sync/upstream-${{ steps.ver.outputs.sha }}
+          branch: sync/upstream
           title: "sync: upstream amurcanov ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
           body: |
             Автоматический синк из upstream репозитория.
