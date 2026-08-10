@@ -444,7 +444,7 @@ body.light ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 .field-row--top { align-items: flex-start; }
 .label--top     { padding-top: 6px; }
 .vk-list        { flex: 1; display: flex; flex-direction: column; gap: 4px;
-                  max-height: 150px; overflow-y: auto; padding-right: 2px; }
+                  max-height: 115px; overflow-y: auto; padding-right: 2px; }
 .btn-add-hash   { margin-left: 4px; margin-top: 1px; }
 .hint--spaced   { margin-top: 4px; margin-bottom: 10px; }
 .fields--top    { margin-top: 8px; }
