@@ -42,7 +42,12 @@ function setBusy(btn, busy, busyText) {
     if (btn.dataset.label) btn.textContent = btn.dataset.label;
     btn.classList.remove('is-busy');
   }
-}
+  // Update status badge to show loading state
+  if (btn.id === 'btn-connect' || btn.id === 'btn-pause' || btn.id === 'btn-stop' || 
+      btn.id === 'btn-pstart' || btn.id === 'btn-pstop' || btn.id === 'btn-deploy' || btn.id === 'btn-undeploy') {
+    const statusEl = document.getElementById('status-badge');
+    if (statusEl && busy) {
+      statusEl.innerHTML = '<span class=
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -747,6 +752,10 @@ async function initTheme() {
   // Тема ещё не выбрана — берём предпочтение ОС.
   const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
   applyTheme(prefersLight ? 'light' : 'dark');
+  // Сохраняем предпочтение ОС как пользовательский выбор
+  if (window.go?.main?.App?.SetTheme) {
+    window.go.main.App.SetTheme(prefersLight ? 'light' : 'dark');
+  }
 }
 
 function applyTheme(theme) {

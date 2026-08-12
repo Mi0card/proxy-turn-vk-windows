@@ -8,7 +8,7 @@
 </head>
 <body>
 
-<div id="toast-box" class="toast-box" role="status" aria-live="polite"></div>
+<div id="toast-box" class="toast-box" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <!-- ── Топ-бар ── -->
 <header class="topbar">
@@ -34,12 +34,12 @@
 
 <!-- ── Вкладки ── -->
 <nav class="tabs">
-  <button class="tab active" data-tab="connect">Подключение</button>
-  <button class="tab" data-tab="proxy">Proxy</button>
-  <button class="tab" data-tab="logs">Логи</button>
-  <button class="tab" data-tab="wg">WireGuard</button>
-  <button class="tab" data-tab="deploy">Deploy</button>
-  <button class="tab" data-tab="help">Справка</button>
+  <button class="tab active" data-tab="connect" aria-label="Вкладка подключение">Подключение</button>
+  <button class="tab" data-tab="proxy" aria-label="Вкладка прокси">Proxy</button>
+  <button class="tab" data-tab="logs" aria-label="Вкладка логи">Логи</button>
+  <button class="tab" data-tab="wg" aria-label="Вкладка WireGuard">WireGuard</button>
+  <button class="tab" data-tab="deploy" aria-label="Вкладка деплой">Deploy</button>
+  <button class="tab" data-tab="help" aria-label="Вкладка справка">Справка</button>
 </nav>
 
 <!-- ── Контент вкладок ── -->
@@ -52,7 +52,7 @@
       <div class="row-flex">
         <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
         <button class="btn btn-sm" onclick="pasteInput('wlink')" title="Вставить" aria-label="Вставить ссылку из буфера обмена">📋</button>
-        <button class="btn btn-primary btn-sm" onclick="parseWdtt()">Разобрать</button>
+        <button class="btn btn-primary btn-sm" onclick="parseWdtt()" aria-label="Разобрать wdtt ссылку">Разобрать</button>
       </div>
     </div>
 
@@ -118,9 +118,9 @@
     <div id="bin-status" class="bin-status"></div>
 
     <div class="btn-row">
-      <button id="btn-connect" class="btn btn-connect" onclick="connect()">▶  Подключить</button>
-      <button id="btn-pause"   class="btn btn-pause"   onclick="pauseResume()" disabled>⏸  Пауза</button>
-      <button id="btn-stop"    class="btn btn-stop"    onclick="stop()" disabled>■  Стоп</button>
+      <button id="btn-connect" class="btn btn-connect" onclick="connect()" aria-label="Подключить туннель">▶  Подключить</button>
+      <button id="btn-pause"   class="btn btn-pause"   onclick="pauseResume()" disabled aria-label="Пауза/продолжить туннель">⏸  Пауза</button>
+      <button id="btn-stop"    class="btn btn-stop"    onclick="stop()" disabled aria-label="Остановить туннель">■  Стоп</button>
     </div>
 
     <div id="captcha-panel" class="card card--mt" style="display:none">
@@ -128,7 +128,7 @@
       <div class="row-flex">
         <input id="captcha-token" type="text" class="inp mono" placeholder="токен капчи">
         <button class="btn btn-sm" onclick="pasteInput('captcha-token')" title="Вставить" aria-label="Вставить токен капчи из буфера обмена">📋</button>
-        <button class="btn btn-primary btn-sm" onclick="sendCaptcha()">Отправить</button>
+        <button class="btn btn-primary btn-sm" onclick="sendCaptcha()" aria-label="Отправить токен капчи">Отправить</button>
       </div>
     </div>
   </section>
@@ -175,8 +175,8 @@
     </div>
 
     <div class="btn-row">
-      <button id="btn-pstart" class="btn btn-connect" onclick="proxyStart()">▶  Запустить</button>
-      <button id="btn-pstop"  class="btn btn-stop"   onclick="proxyStop()" disabled>■  Остановить</button>
+      <button id="btn-pstart" class="btn btn-connect" onclick="proxyStart()" aria-label="Запустить прокси">▶  Запустить</button>
+      <button id="btn-pstop"  class="btn btn-stop"   onclick="proxyStop()" disabled aria-label="Остановить прокси">■  Остановить</button>
     </div>
 
     <div id="proxy-hint" class="hint-box" style="display:none"></div>
@@ -225,8 +225,8 @@
         </div>
 
         <div class="btn-row">
-          <button id="btn-deploy" class="btn btn-primary" onclick="deploy()">🚀  Установить wdtt-server</button>
-          <button id="btn-undeploy" class="btn btn-stop" onclick="undeploy()">🗑  Удалить</button>
+          <button id="btn-deploy" class="btn btn-primary" onclick="deploy()" aria-label="Установить wdtt-server">🚀  Установить wdtt-server</button>
+          <button id="btn-undeploy" class="btn btn-stop" onclick="undeploy()" aria-label="Удалить wdtt-server">🗑  Удалить</button>
         </div>
         <p class="hint hint--spaced">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
 
@@ -251,7 +251,7 @@
       <div class="deploy-log-panel">
         <div class="deploy-log-header">
           <span class="log-title">DEPLOY LOG</span>
-          <button class="btn btn-sm" onclick="clearDeployLog()">Очистить</button>
+          <button class="btn btn-sm" onclick="clearDeployLog()" aria-label="Очистить лог деплоя">Очистить</button>
         </div>
         <div id="deploy-log-box" class="deploy-log-box" data-empty-text="Лог деплоя появится здесь после запуска."></div>
       </div>
@@ -275,9 +275,9 @@ AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 </textarea>
     <div class="btn-row">
-      <button class="btn" onclick="wgOpen()">📂 Открыть</button>
-      <button class="btn" onclick="wgCopy()">📋 Копировать</button>
-      <button class="btn" onclick="wgSave()">💾 Скачать .conf</button>
+      <button class="btn" onclick="wgOpen()" aria-label="Открыть WireGuard конфиг">📂 Открыть</button>
+      <button class="btn" onclick="wgCopy()" aria-label="Копировать WireGuard конфиг">📋 Копировать</button>
+      <button class="btn" onclick="wgSave()" aria-label="Скачать WireGuard конфиг">💾 Скачать .conf</button>
       <span id="wg-copy-hint" class="hint" style="display:none">✔ Скопировано!</span>
     </div>
   </section>
@@ -287,8 +287,8 @@ PersistentKeepalive = 25
     <div class="log-panel-inner">
       <div class="log-header">
         <div class="log-tabs">
-          <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')">Туннель</button>
-          <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')">Прокси</button>
+          <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')" aria-label="Переключить на лог туннеля">Туннель</button>
+          <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')" aria-label="Переключить на лог прокси">Прокси</button>
         </div>
         <div class="log-filters" id="log-filter-row">
           <span class="filter-label">Фильтр:</span>
@@ -299,7 +299,7 @@ PersistentKeepalive = 25
         </div>
         <div class="log-btns">
           <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог" aria-label="Сохранить лог в файл">💾</button>
-          <button class="btn btn-sm" onclick="clearLog()">Очистить</button>
+          <button class="btn btn-sm" onclick="clearLog()" aria-label="Очистить лог">Очистить</button>
         </div>
       </div>
       <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
