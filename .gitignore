@@ -10,3 +10,6 @@ upstream/
 .idea/
 .vscode/
 .pi/
+
+# EXTRA
+plans/
