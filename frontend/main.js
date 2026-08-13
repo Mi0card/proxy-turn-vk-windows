@@ -1,6 +1,6 @@
 'use strict';
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── Состояния ─────────────────────────────────────────────────────────────────────
 
 const state = {
   tunnelRunning:  false,
@@ -42,14 +42,17 @@ function setBusy(btn, busy, busyText) {
     if (btn.dataset.label) btn.textContent = btn.dataset.label;
     btn.classList.remove('is-busy');
   }
-  // Update status badge to show loading state
+  // Обновляем статус бадж для отображения загрузки
   if (btn.id === 'btn-connect' || btn.id === 'btn-pause' || btn.id === 'btn-stop' || 
       btn.id === 'btn-pstart' || btn.id === 'btn-pstop' || btn.id === 'btn-deploy' || btn.id === 'btn-undeploy') {
     const statusEl = document.getElementById('status-badge');
     if (statusEl && busy) {
-      statusEl.innerHTML = '<span class=
+      statusEl.innerHTML = '<span class="dot"></span> Загрузка...';
+    }
+  }
+}
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Инициализация ──────────────────────────────────────────────────────────────────────
 
 window.addEventListener('load', async () => {
   initTheme();
@@ -103,7 +106,7 @@ window.addEventListener('load', async () => {
   log('WinDTT v' + ver + ' запущен', 'success');
 });
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// ── Вкладки ──────────────────────────────────────────────────────────────────────
 
 function switchTab(name) {
   state.activeTab = name;
@@ -122,7 +125,7 @@ function switchTab(name) {
   }
 }
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Конфиг ────────────────────────────────────────────────────────────────────
 
 function loadConfig(cfg) {
   // Устанавливаем только непустые значения — не затираем HTML-дефолты
@@ -184,7 +187,7 @@ async function saveConfig() {
   await window.go.main.App.SaveConfig(cfg);
 }
 
-// ── Parse wdtt:// ─────────────────────────────────────────────────────────────
+// ── Парсим wdtt:// ─────────────────────────────────────────────────────────────
 
 async function parseWdtt() {
   const link = getVal('wlink');
@@ -199,7 +202,7 @@ async function parseWdtt() {
   }
 }
 
-// ── Tunnel ────────────────────────────────────────────────────────────────────
+// ── Туннель ────────────────────────────────────────────────────────────────────
 
 async function connect() {
   const vk  = getVkHashes();
@@ -294,7 +297,7 @@ async function sendCaptcha() {
   }
 }
 
-// ── Tunnel events ─────────────────────────────────────────────────────────────
+// ── События туннеля ─────────────────────────────────────────────────────────────
 
 function onTunnelStatus(s) {
   state.tunnelRunning = s.running;
@@ -687,7 +690,7 @@ async function wgCopy() {
   }
 }
 
-// ── Log ───────────────────────────────────────────────────────────────────────
+// ── Лог ───────────────────────────────────────────────────────────────────────
 
 function log(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
