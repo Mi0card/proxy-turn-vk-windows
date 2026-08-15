@@ -247,6 +247,7 @@ type ProxyServer struct {
 	mu       sync.Mutex
 	socks5Ln net.Listener
 	httpLn   net.Listener
+	httpSrv  *http.Server // для закрытия in-flight соединений в Stop()
 	running  bool
 	logFn    func(msg, lv string)
 	statsFn  func(ProxyStats)
@@ -317,12 +318,14 @@ func (p *ProxyServer) route(host string) ruleResult {
 }
 
 // dialForRoute открывает соединение согласно политике маршрутизации.
-// proxy (default) → через туннель; direct → напрямую.
+// proxy (default) → строго через туннель; direct → напрямую.
+// Без туннеля proxy-политика не уходит в прямое соединение (утечка трафика) —
+// возвращается ошибка, как у системного прокси (SOCKS5 → 0x05, HTTP → 502).
 func (p *ProxyServer) dialForRoute(policy, network, addr string) (net.Conn, error) {
 	if policy == PolicyDirect {
 		return net.DialTimeout(network, addr, 30*time.Second)
 	}
-	return wgDial(network, addr)
+	return wgDialStrict(network, addr)
 }
 
 func (p *ProxyServer) connOpen() {
@@ -377,6 +380,7 @@ func (p *ProxyServer) Start(host, socks5Port, httpPort string, useAuth bool, use
 
 	p.socks5Ln = s5ln
 	p.httpLn = httpLn
+	p.httpSrv = nil
 	p.running = true
 
 	via := "прямое соединение"
@@ -400,8 +404,16 @@ func (p *ProxyServer) Stop() {
 	if !p.running {
 		return
 	}
-	if p.socks5Ln != nil { p.socks5Ln.Close() }
-	if p.httpLn != nil   { p.httpLn.Close() }
+	if p.socks5Ln != nil {
+		p.socks5Ln.Close()
+	}
+	if p.httpLn != nil {
+		p.httpLn.Close()
+	}
+	if p.httpSrv != nil {
+		p.httpSrv.Close() // завершает in-flight соединения и accept-горутину
+		p.httpSrv = nil
+	}
 	p.running = false
 	atomic.StoreInt32(&p.active, 0)
 	if p.statsFn != nil {
@@ -417,7 +429,9 @@ func (p *ProxyServer) Running() bool {
 }
 
 func (p *ProxyServer) log(msg, lv string) {
-	if p.logFn != nil { p.logFn(msg, lv) }
+	if p.logFn != nil {
+		p.logFn(msg, lv)
+	}
 }
 
 // ── SOCKS5 ────────────────────────────────────────────────────────────────────
@@ -426,7 +440,9 @@ func (p *ProxyServer) acceptSocks5(ln net.Listener, useAuth bool, user, pass str
 	defer func() { recover() }() // П.7
 	for {
 		c, err := ln.Accept()
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 		if p.connCount() >= maxProxyConn {
 			c.Close()
 			p.log("SOCKS5: лимит соединений достигнут", "warn")
@@ -445,20 +461,32 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	c.SetDeadline(time.Now().Add(30 * time.Second))
 
 	buf := make([]byte, 2)
-	if _, err := io.ReadFull(c, buf); err != nil || buf[0] != 5 { return }
+	if _, err := io.ReadFull(c, buf); err != nil || buf[0] != 5 {
+		return
+	}
 	methods := make([]byte, int(buf[1]))
-	if _, err := io.ReadFull(c, methods); err != nil { return }
+	if _, err := io.ReadFull(c, methods); err != nil {
+		return
+	}
 
 	if useAuth {
 		c.Write([]byte{5, 2})
 		hdr := make([]byte, 2)
-		if _, err := io.ReadFull(c, hdr); err != nil || hdr[0] != 1 { return }
+		if _, err := io.ReadFull(c, hdr); err != nil || hdr[0] != 1 {
+			return
+		}
 		uname := make([]byte, int(hdr[1]))
-		if _, err := io.ReadFull(c, uname); err != nil { return }
+		if _, err := io.ReadFull(c, uname); err != nil {
+			return
+		}
 		plen := make([]byte, 1)
-		if _, err := io.ReadFull(c, plen); err != nil { return }
+		if _, err := io.ReadFull(c, plen); err != nil {
+			return
+		}
 		pwd := make([]byte, int(plen[0]))
-		if _, err := io.ReadFull(c, pwd); err != nil { return }
+		if _, err := io.ReadFull(c, pwd); err != nil {
+			return
+		}
 		if string(uname) != user || string(pwd) != pass {
 			c.Write([]byte{1, 1})
 			p.log("→ SOCKS5 авторизация отклонена", "warn")
@@ -479,17 +507,25 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	switch req[3] {
 	case 1:
 		ip := make([]byte, 4)
-		if _, err := io.ReadFull(c, ip); err != nil { return }
+		if _, err := io.ReadFull(c, ip); err != nil {
+			return
+		}
 		host = net.IP(ip).String()
 	case 3:
 		dlen := make([]byte, 1)
-		if _, err := io.ReadFull(c, dlen); err != nil { return }
+		if _, err := io.ReadFull(c, dlen); err != nil {
+			return
+		}
 		domain := make([]byte, int(dlen[0]))
-		if _, err := io.ReadFull(c, domain); err != nil { return }
+		if _, err := io.ReadFull(c, domain); err != nil {
+			return
+		}
 		host = string(domain)
 	case 4:
 		ip := make([]byte, 16)
-		if _, err := io.ReadFull(c, ip); err != nil { return }
+		if _, err := io.ReadFull(c, ip); err != nil {
+			return
+		}
 		host = "[" + net.IP(ip).String() + "]"
 	default:
 		c.Write([]byte{5, 8, 0, 1, 0, 0, 0, 0, 0, 0})
@@ -497,7 +533,9 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	}
 
 	portBuf := make([]byte, 2)
-	if _, err := io.ReadFull(c, portBuf); err != nil { return }
+	if _, err := io.ReadFull(c, portBuf); err != nil {
+		return
+	}
 	target := fmt.Sprintf("%s:%d", host, binary.BigEndian.Uint16(portBuf))
 
 	// Маршрутизация по правилам.
@@ -519,7 +557,9 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 
 	c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	via := "туннель"
-	if route.policy == PolicyDirect { via = "напрямую" }
+	if route.policy == PolicyDirect {
+		via = "напрямую"
+	}
 	p.log(fmt.Sprintf("→ %s  [%dms, %s]", target, time.Since(start).Milliseconds(), via), "dim")
 
 	// П.6 — context для graceful cancel обеих горутин
@@ -554,6 +594,9 @@ func (p *ProxyServer) acceptHTTP(ln net.Listener, useAuth bool, user, pass strin
 			p.handleHTTP(w, r, useAuth, user, pass)
 		}),
 	}
+	p.mu.Lock()
+	p.httpSrv = srv
+	p.mu.Unlock()
 	srv.Serve(ln)
 }
 
@@ -589,24 +632,31 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		defer remote.Close()
 		w.WriteHeader(http.StatusOK)
 		via := "туннель"
-		if route.policy == PolicyDirect { via = "напрямую" }
+		if route.policy == PolicyDirect {
+			via = "напрямую"
+		}
 		p.log(fmt.Sprintf("→ %s [CONNECT, %s]", r.Host, via), "dim")
 
 		hj, ok := w.(http.Hijacker)
-		if !ok { return }
+		if !ok {
+			return
+		}
 		clientConn, _, _ := hj.Hijack()
 		defer clientConn.Close()
 
-		// П.5 — таймаут на hijacked соединение
-		deadline := time.Now().Add(10 * time.Minute)
-		clientConn.SetDeadline(deadline)
-		remote.SetDeadline(deadline)
+		// Idle-timeout: дедлайн сбрасывается при каждой активности,
+		// долгие стримы не обрываются по абсолютному дедлайну.
+		idle := 10 * time.Minute
+		ci := &idleConn{Conn: clientConn, idle: idle}
+		ri := &idleConn{Conn: remote, idle: idle}
+		ci.SetDeadline(time.Now().Add(idle))
+		ri.SetDeadline(time.Now().Add(idle))
 
 		// П.6 — context для graceful cancel
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go func() { defer cancel(); io.Copy(remote, clientConn) }()
-		go func() { defer cancel(); io.Copy(clientConn, remote) }()
+		go func() { defer cancel(); io.Copy(ri, ci) }()
+		go func() { defer cancel(); io.Copy(ci, ri) }()
 		<-ctx.Done()
 		return
 	}
@@ -633,7 +683,9 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		r.Header.Del(h)
 	}
 	via := "туннель"
-	if route.policy == PolicyDirect { via = "напрямую" }
+	if route.policy == PolicyDirect {
+		via = "напрямую"
+	}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return p.dialForRoute(route.policy, network, addr)
@@ -646,11 +698,37 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	}
 	defer resp.Body.Close()
 	for k, vv := range resp.Header {
-		for _, v := range vv { w.Header().Add(k, v) }
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 	p.log(fmt.Sprintf("→ %s %s [%s]", r.Method, r.URL.Host, via), "dim")
+}
+
+// idleConn обновляет deadline при каждом успешном чтении/записи — это даёт
+// idle-timeout вместо абсолютного дедлайна: долгие (дольше idle) стримы не
+// обрываются, а «мёртвые» соединения без активности корректно отмирают.
+type idleConn struct {
+	net.Conn
+	idle time.Duration
+}
+
+func (c *idleConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err == nil {
+		c.Conn.SetDeadline(time.Now().Add(c.idle))
+	}
+	return n, err
+}
+
+func (c *idleConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if err == nil {
+		c.Conn.SetDeadline(time.Now().Add(c.idle))
+	}
+	return n, err
 }
 
 // ── System Proxy handler (без auth, отдельный листенер) ──────────────────────
@@ -695,14 +773,17 @@ func (h *sysProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request) 
 	client, _, _ := hj.Hijack()
 	defer client.Close()
 
-	deadline := time.Now().Add(10 * time.Minute)
-	client.SetDeadline(deadline)
-	remote.SetDeadline(deadline)
+	// Idle-timeout вместо абсолютного дедлайна.
+	idle := 10 * time.Minute
+	ci := &idleConn{Conn: client, idle: idle}
+	ri := &idleConn{Conn: remote, idle: idle}
+	ci.SetDeadline(time.Now().Add(idle))
+	ri.SetDeadline(time.Now().Add(idle))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { defer cancel(); io.Copy(remote, client) }()
-	go func() { defer cancel(); io.Copy(client, remote) }()
+	go func() { defer cancel(); io.Copy(ri, ci) }()
+	go func() { defer cancel(); io.Copy(ci, ri) }()
 	<-ctx.Done()
 }
 

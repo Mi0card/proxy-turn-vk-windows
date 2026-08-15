@@ -604,7 +604,7 @@ function renderRoutingList() {
   container.innerHTML = routingDraft.map((rs, i) => `
     <div class="ruleset-item">
       <input type="checkbox" class="rr-enable" data-i="${i}" ${rs.enable ? 'checked' : ''} title="Включить правило">
-      <span class="ruleset-type">${routingRuleType(rs.rule)}</span>
+      <span class="ruleset-type">${escHtml(routingRuleType(rs.rule))}</span>
       <span class="ruleset-group mono">${escHtml(routingRuleGroup(rs.rule) || rs.rule)}</span>
       <select class="sel rr-policy" data-i="${i}" title="Политика">
         <option value="proxy"  ${rs.policy === 'proxy'  ? 'selected' : ''}>proxy</option>

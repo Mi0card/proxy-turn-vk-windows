@@ -26,27 +26,27 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.0"
+const AppVersion = "0.2.5.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type Config struct {
-	VK          string `json:"vk"`
-	Srv         string `json:"srv"`
-	Sec         string `json:"sec"`
-	N           string `json:"n"`
-	Listen      string `json:"listen"`
-	CaptchaMode  string `json:"captcha_mode"`
-	ObfsMode     string `json:"obfs_mode"`
-	Fingerprint  string `json:"fingerprint"`
-	DeviceID     string `json:"device_id"`
-	PxHost      string `json:"px_host"`
-	PxSocksPort string `json:"px_socks_port"`
-	PxHttpPort  string `json:"px_http_port"`
-	PxUseAuth   bool   `json:"px_use_auth"`
-	PxUser      string `json:"px_user"`
-	PxPass      string `json:"px_pass"`
-	Theme       string `json:"theme"`
+	VK          string          `json:"vk"`
+	Srv         string          `json:"srv"`
+	Sec         string          `json:"sec"`
+	N           string          `json:"n"`
+	Listen      string          `json:"listen"`
+	CaptchaMode string          `json:"captcha_mode"`
+	ObfsMode    string          `json:"obfs_mode"`
+	Fingerprint string          `json:"fingerprint"`
+	DeviceID    string          `json:"device_id"`
+	PxHost      string          `json:"px_host"`
+	PxSocksPort string          `json:"px_socks_port"`
+	PxHttpPort  string          `json:"px_http_port"`
+	PxUseAuth   bool            `json:"px_use_auth"`
+	PxUser      string          `json:"px_user"`
+	PxPass      string          `json:"px_pass"`
+	Theme       string          `json:"theme"`
 	Rulesets    []RulesetConfig `json:"rulesets"`
 }
 
@@ -92,8 +92,8 @@ type App struct {
 	totalWorkers  int
 	lastTrafficMB float64
 	lastStatTime  time.Time
-	wgConfPath string // путь к wg-turn.conf рядом с wdtt-client.exe
-	pingStop   chan struct{}
+	wgConfPath    string // путь к wg-turn.conf рядом с wdtt-client.exe
+	pingStop      chan struct{}
 
 	// Watchdog + Circuit Breaker
 	watchdogStop     chan struct{}
@@ -106,10 +106,13 @@ type App struct {
 	lastActiveAt     int64 // unix ms последней активности воркеров
 	procStartedAt    int64 // unix ms запуска процесса
 	lastCBReset      int64 // unix ms последнего сброса circuit breaker
-	activeWorkers int
+	activeWorkers    int
 
 	// Закрытие
 	closeAllowed atomic.Bool
+
+	// Капча: защита от открытия нескольких окон при повторных CAPTCHA_SOLVE
+	captchaOpen atomic.Bool
 
 	// Системный прокси (WinINET)
 	sysProxyMu  sync.Mutex // защищает sysProxyLn/sysProxySrv от гонки Enable/Disable
@@ -118,8 +121,8 @@ type App struct {
 	sysProxySrv *http.Server // для graceful close
 
 	// Прокси (SOCKS5 + HTTP)
-	proxy         *ProxyServer
-	socksStats    struct {
+	proxy      *ProxyServer
+	socksStats struct {
 		mu     sync.Mutex
 		active int
 		total  int
@@ -129,7 +132,8 @@ type App struct {
 	ruleset *RulesetManager
 
 	// Конфиг
-	cfg Config
+	cfgMu sync.RWMutex // защищает cfg от конкурентных чтений/записей (Wails вызывает бинды конкурентно)
+	cfg   Config
 }
 
 // ── Regex ────────────────────────────────────────────────────────────────────
@@ -140,7 +144,6 @@ var (
 	reTraffic = regexp.MustCompile(`(?i)трафик:\s*([\d.]+)\s*(МБ|MB|KB|КБ|GB|ГБ)`)
 	reFatal   = regexp.MustCompile(`(?i)фатальн|fatal_auth|fatal auth`)
 )
-
 
 // extractClientExe распаковывает встроенный wdtt-client.exe во временную папку.
 func extractClientExe(data []byte) (string, error) {
@@ -164,19 +167,16 @@ func extractClientExe(data []byte) (string, error) {
 
 // NewAppWithExe создаёт App с явным путём к wdtt-client.exe (из embed).
 // Если exePath пустой — startup ищет exe рядом с WinDTT.exe.
+// RulesetManager инициализируется один раз в startup (с корректным baseDir).
 func NewAppWithExe(exePath string) *App {
 	a := &App{overrideClientExe: exePath}
 	a.proxy = NewProxyServer(a.socksLog, a.onProxyStats)
-	a.ruleset = NewRulesetManager(a.baseDir)
-	a.proxy.SetRulesetManager(a.ruleset)
 	return a
 }
 
 func NewApp() *App {
 	a := &App{}
 	a.proxy = NewProxyServer(a.socksLog, a.onProxyStats)
-	a.ruleset = NewRulesetManager(a.baseDir)
-	a.proxy.SetRulesetManager(a.ruleset)
 	return a
 }
 
@@ -202,7 +202,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ruleset = NewRulesetManager(a.baseDir)
 	if a.proxy != nil {
 		a.proxy.SetRulesetManager(a.ruleset)
-		a.proxy.SetRulesets(a.cfg.Rulesets)
+		a.proxy.SetRulesets(a.getCfg().Rulesets)
 	}
 	// Асинхронно подгружаем правила (из кеша или сети).
 	go func() {
@@ -318,15 +318,26 @@ func (a *App) loadConfig() {
 	if err != nil {
 		return
 	}
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
 	json.Unmarshal(data, &a.cfg)
 }
 
-func (a *App) GetConfig() Config {
+// getCfg возвращает копию конфига под RLock.
+func (a *App) getCfg() Config {
+	a.cfgMu.RLock()
+	defer a.cfgMu.RUnlock()
 	return a.cfg
 }
 
+func (a *App) GetConfig() Config {
+	return a.getCfg()
+}
+
 func (a *App) SaveConfig(cfg Config) {
+	a.cfgMu.Lock()
 	a.cfg = cfg
+	a.cfgMu.Unlock()
 	a.persistConfig()
 }
 
@@ -337,11 +348,13 @@ func (a *App) GetVersion() string {
 // GetTheme возвращает сохранённую тему, либо "" если пользователь ещё
 // не выбирал — фронтенд в этом случае определяет тему по prefers-color-scheme ОС.
 func (a *App) GetTheme() string {
-	return a.cfg.Theme
+	return a.getCfg().Theme
 }
 
 func (a *App) SetTheme(theme string) {
+	a.cfgMu.Lock()
 	a.cfg.Theme = theme
+	a.cfgMu.Unlock()
 	a.persistConfig()
 }
 
@@ -390,9 +403,19 @@ func shellQuote(s string) string {
 }
 
 // persistConfig сохраняет конфиг с правами 0600 (содержит секреты).
-func (a *App) persistConfig() {
-	data, _ := json.MarshalIndent(a.cfg, "", "  ")
-	_ = os.WriteFile(a.configFile, data, 0600)
+// Ошибка записи логируется — раньше она молча проглатывалась, из-за чего
+// секреты могли не сохраниться (например, exe в защищённой папке).
+func (a *App) persistConfig() error {
+	data, err := json.MarshalIndent(a.cfg, "", "  ")
+	if err != nil {
+		a.log("⚠ Не удалось сериализовать конфиг: "+err.Error(), "warn")
+		return err
+	}
+	if err := os.WriteFile(a.configFile, data, 0600); err != nil {
+		a.log("⚠ Не удалось сохранить конфиг: "+err.Error(), "warn")
+		return err
+	}
+	return nil
 }
 
 // sshHostKeyCallback сверяет ключ хоста с ожидаемым SHA-256 отпечатком
@@ -483,7 +506,6 @@ func (a *App) classifyLine(line string) (label, level string) {
 	}
 }
 
-
 // generateUUID генерирует случайный UUID v4 без внешних зависимостей.
 
 func cryptoReader() io.Reader {
@@ -493,10 +515,11 @@ func cryptoReader() io.Reader {
 func generateUUID() string {
 	b := make([]byte, 16)
 	if _, err := io.ReadFull(cryptoReader(), b); err != nil {
-		// Fallback на time-based если crypto недоступен
-		t := time.Now().UnixNano()
-		for i := 0; i < 16; i++ {
-			b[i] = byte(t >> (i * 4))
+		// Ретрим один раз — crypto/rand практически всегда доступен.
+		if _, err2 := io.ReadFull(cryptoReader(), b); err2 != nil {
+			// Крайний fallback: детерминированный хеш времени+PID процесса.
+			h := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())))
+			copy(b, h[:16])
 		}
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
@@ -525,7 +548,9 @@ func (a *App) TunnelStart(
 	// Генерируем device_id если пустой и сохраняем в конфиг
 	if deviceID == "" {
 		deviceID = generateUUID()
+		a.cfgMu.Lock()
 		a.cfg.DeviceID = deviceID
+		a.cfgMu.Unlock()
 		a.persistConfig()
 	}
 
@@ -670,7 +695,9 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 				var speedKBs float64
 				if !a.lastStatTime.IsZero() && now.Sub(a.lastStatTime) > 0 {
 					diff := currentMB - a.lastTrafficMB
-					if diff < 0 { diff = 0 }
+					if diff < 0 {
+						diff = 0
+					}
 					dt := now.Sub(a.lastStatTime).Seconds()
 					speedKBs = (diff * 1024) / dt
 				}
@@ -699,9 +726,15 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 			}
 			redirectURI := parts[1]
 			a.log("⚠  Требуется капча — открываю окно подтверждения VK...", "warn")
+			// Не открываем второе окно, пока предыдущее не закрыто.
+			if !a.captchaOpen.CompareAndSwap(false, true) {
+				a.log("⚠  Капча уже решается в открытом окне — повторный запрос проигнорирован", "warn")
+				continue
+			}
 			runtime.EventsEmit(a.ctx, "tunnel:captcha", "webview")
 			baseDir := a.baseDir
 			go openCaptchaWebView(redirectURI, baseDir, func(result string) {
+				a.captchaOpen.Store(false)
 				a.TunnelSendCaptcha(result)
 				runtime.EventsEmit(a.ctx, "tunnel:captcha:done", nil)
 			})
@@ -762,7 +795,6 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 			}
 		}
 
-
 		// Заголовок этапа — только при смене
 		parallelStages := map[string]bool{
 			"Handshake": true, "TURN relay": true,
@@ -810,6 +842,7 @@ func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
 	a.pingStop = nil
 	ws := a.watchdogStop
 	a.watchdogStop = nil
+	totalWorkers := a.totalWorkers
 	a.tunnelMu.Unlock()
 
 	if ps != nil {
@@ -830,7 +863,7 @@ func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": false, "paused": false,
 	})
-	runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: 0, Total: a.totalWorkers})
+	runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: 0, Total: totalWorkers})
 }
 
 func (a *App) tunnelSend(cmd string) {
@@ -850,7 +883,9 @@ func (a *App) checkCircuitBreaker(line string) {
 
 	// Сброс счётчиков каждые 60 секунд (как в Android)
 	now := time.Now().UnixMilli()
-	if a.lastCBReset == 0 { a.lastCBReset = now }
+	if a.lastCBReset == 0 {
+		a.lastCBReset = now
+	}
 	if now-a.lastCBReset > 60_000 {
 		a.floodCount = 0
 		a.mismatchCount = 0
@@ -1112,23 +1147,10 @@ type SocksStatsResult struct {
 	Total  int `json:"total"`
 }
 
-func (a *App) SocksStart(host, port, user, pwd string) string {
-	// Обратная совместимость — запускаем только SOCKS5
-	// HTTP порт = SOCKS5 порт + 1
-	socks5Port := port
-	httpPort := "1081"
-	if port == "1081" { httpPort = "1082" }
-	if err := a.proxy.Start(host, socks5Port, httpPort, user != "", user, pwd); err != nil {
-		return err.Error()
-	}
-	runtime.EventsEmit(a.ctx, "socks:status", true)
-	return ""
-}
-
 func (a *App) ProxyStart(host, socks5Port, httpPort, user, pwd string, useAuth bool) string {
 	// Применяем текущие правила маршрутизации к прокси.
 	if a.proxy != nil {
-		a.proxy.SetRulesets(a.cfg.Rulesets)
+		a.proxy.SetRulesets(a.getCfg().Rulesets)
 	}
 	if err := a.proxy.Start(host, socks5Port, httpPort, useAuth, user, pwd); err != nil {
 		return err.Error()
@@ -1161,10 +1183,11 @@ type RulesetStatus struct {
 
 // GetRulesets возвращает текущий список правил маршрутизации.
 func (a *App) GetRulesets() []RulesetConfig {
-	if a.cfg.Rulesets == nil {
+	cfg := a.getCfg()
+	if cfg.Rulesets == nil {
 		return []RulesetConfig{}
 	}
-	return a.cfg.Rulesets
+	return cfg.Rulesets
 }
 
 // SetRulesets сохраняет список правил (с валидацией) в конфиг.
@@ -1186,7 +1209,9 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 		}
 		filtered = append(filtered, rc)
 	}
+	a.cfgMu.Lock()
 	a.cfg.Rulesets = filtered
+	a.cfgMu.Unlock()
 	a.persistConfig()
 	return ""
 }
@@ -1215,7 +1240,7 @@ func (a *App) UpdateRulesets() string {
 	}
 	// Применяем правила к работающему прокси.
 	if a.proxy != nil {
-		a.proxy.SetRulesets(a.cfg.Rulesets)
+		a.proxy.SetRulesets(a.getCfg().Rulesets)
 	}
 	a.socksLog("Роутинг: правила обновлены.", "success")
 	return ""
@@ -1227,18 +1252,17 @@ func (a *App) EnsureRulesetsLoaded() string {
 	if a.ruleset == nil {
 		return ""
 	}
-	if len(a.cfg.Rulesets) == 0 {
+	if len(a.getCfg().Rulesets) == 0 {
 		return ""
 	}
 	if err := a.ruleset.EnsureLoaded(); err != nil {
 		return err.Error()
 	}
 	if a.proxy != nil {
-		a.proxy.SetRulesets(a.cfg.Rulesets)
+		a.proxy.SetRulesets(a.getCfg().Rulesets)
 	}
 	return ""
 }
-
 
 // ── Deploy API ────────────────────────────────────────────────────────────────
 
@@ -1325,7 +1349,9 @@ func (a *App) DeployGetFingerprint(ip, port string) FingerprintResult {
 	}
 	fp := strings.Join(pairs, ":")
 	// Сохраняем — undeploy и будущие деплои смогут использовать
+	a.cfgMu.Lock()
 	a.cfg.Fingerprint = fp
+	a.cfgMu.Unlock()
 	a.persistConfig()
 	return FingerprintResult{OK: true, Fingerprint: fp}
 }
