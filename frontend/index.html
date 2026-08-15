@@ -318,6 +318,7 @@ PersistentKeepalive = 25
         <div class="log-tabs">
           <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')" aria-label="Переключить на лог туннеля">Туннель</button>
           <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')" aria-label="Переключить на лог прокси">Прокси</button>
+          <button class="log-tab" id="ltab-routing" onclick="switchLogTab('routing')" aria-label="Переключить на лог маршрутизации">Маршрутизация</button>
         </div>
         <div class="log-filters" id="log-filter-row">
           <span class="filter-label">Фильтр:</span>
@@ -333,6 +334,7 @@ PersistentKeepalive = 25
       </div>
       <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
       <div id="socks-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события прокси."></div>
+      <div id="routing-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события маршрутизации."></div>
     </div>
   </section>
 

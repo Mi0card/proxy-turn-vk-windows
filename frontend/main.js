@@ -8,6 +8,7 @@ const state = {
   socksRunning:   false,
   logEntries:     [],   // [{ts, msg, lv}] — туннель
   socksEntries:   [],   // [{ts, msg, lv}] — SOCKS5
+  routingEntries: [],   // [{ts, msg, lv}] — маршрутизация
   logFilter:      'all',
   activeLogTab:   'tunnel',
   lastPingMs:      null,
@@ -76,6 +77,7 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('socks:status', onSocksStatus);
   window.runtime.EventsOn('socks:stats', onSocksStats);
   window.runtime.EventsOn('socks:log', onSocksLog);
+  window.runtime.EventsOn('routing:log', onRoutingLog);
   window.runtime.EventsOn('tunnel:stats', onTunnelStats);
   window.runtime.EventsOn('tunnel:ping',  onTunnelPing);
   window.runtime.EventsOn('deploy:log', onDeployLog);
@@ -118,8 +120,8 @@ function switchTab(name) {
   panel.classList.add('active');
   // При переходе на логи — прокручиваем в конец
   if (name === 'logs') {
-    const box = state.activeLogTab === 'socks'
-      ? document.getElementById('socks-log-box')
+    const box = state.activeLogTab === 'socks'   ? document.getElementById('socks-log-box')
+      : state.activeLogTab === 'routing' ? document.getElementById('routing-log-box')
       : document.getElementById('log-box');
     if (box) box.scrollTop = box.scrollHeight;
   }
@@ -544,6 +546,31 @@ function onSocksLog(entry) {
   socksLog(entry.msg, entry.lv);
 }
 
+// ── Лог маршрутизации (ruleset) ───────────────────────────────────────────
+
+// Отдельный лог для маршрутизации (правила, скачивание/обновление дата-файлов).
+function routingLog(msg, lv = 'info') {
+  const ts = new Date().toLocaleTimeString('ru', {hour12: false});
+  const entry = {ts, msg, lv};
+  state.routingEntries.push(entry);
+  appendRoutingLine(entry);
+}
+
+function appendRoutingLine({ts, msg, lv}) {
+  const box = document.getElementById('routing-log-box');
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
+  box.appendChild(line);
+  if (state.activeTab === 'logs' && state.activeLogTab === 'routing') {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+// Получаем отдельные события лога маршрутизации
+function onRoutingLog(entry) {
+  routingLog(entry.msg, entry.lv);
+}
+
 function toggleAuth() {
   const show = document.getElementById('px-use-auth').checked;
   document.getElementById('auth-fields').style.display = show ? '' : 'none';
@@ -673,10 +700,10 @@ function addRoutingRule() {
 async function saveRoutingRules() {
   const configs = routingDraft.map(r => ({ rule: r.rule, policy: r.policy, enable: r.enable }));
   const err = await window.go.main.App.SetRulesets(configs);
-  if (err) { showToast('Роутинг: ' + err); socksLog('Роутинг: ' + err, 'error'); return; }
+  if (err) { showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); return; }
   // Убеждаемся, что правила загружены и применены к прокси.
   await window.go.main.App.EnsureRulesetsLoaded();
-  log('Правила маршрутизации сохранены.', 'success');
+  routingLog('Маршрутизация: правила маршрутизации сохранены.', 'success');
   const status = await window.go.main.App.GetRulesetStatus();
   updateRoutingStatus(status);
 }
@@ -686,12 +713,12 @@ async function updateAllRulesets() {
   setBusy(btn, true, '…  Обновление');
   try {
     const err = await window.go.main.App.UpdateRulesets();
-    if (err) { showToast('Роутинг: ' + err); socksLog('Роутинг: ' + err, 'error'); }
+    if (err) { showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); }
     const status = await window.go.main.App.GetRulesetStatus();
     updateRoutingStatus(status);
   } catch (e) {
-    socksLog('Роутинг: ' + e, 'error');
-    showToast('Роутинг: ' + e);
+    routingLog('Маршрутизация: ' + e, 'error');
+    showToast('Маршрутизация: ' + e);
   } finally {
     setBusy(btn, false);
   }
@@ -866,7 +893,9 @@ function setFilter(f) {
 }
 
 async function saveLog() {
-  const entries = state.activeLogTab === 'tunnel' ? state.logEntries : state.socksEntries;
+  const entries = state.activeLogTab === 'tunnel' ? state.logEntries
+    : state.activeLogTab === 'socks'   ? state.socksEntries
+    : state.routingEntries;
   const lines = entries
     .map(e => `[${e.ts}] [${e.lv.toUpperCase().padEnd(7)}] ${e.msg}`)
     .join('\n');
@@ -878,9 +907,12 @@ function clearLog() {
   if (state.activeLogTab === 'tunnel') {
     state.logEntries = [];
     document.getElementById('log-box').innerHTML = '';
-  } else {
+  } else if (state.activeLogTab === 'socks') {
     state.socksEntries = [];
     document.getElementById('socks-log-box').innerHTML = '';
+  } else {
+    state.routingEntries = [];
+    document.getElementById('routing-log-box').innerHTML = '';
   }
 }
 
@@ -1015,9 +1047,11 @@ function switchLogTab(tab) {
 
   document.getElementById('ltab-tunnel').classList.toggle('active', tab === 'tunnel');
   document.getElementById('ltab-socks').classList.toggle('active',  tab === 'socks');
+  document.getElementById('ltab-routing').classList.toggle('active', tab === 'routing');
 
-  document.getElementById('log-box').style.display       = tab === 'tunnel' ? '' : 'none';
-  document.getElementById('socks-log-box').style.display = tab === 'socks'  ? '' : 'none';
+  document.getElementById('log-box').style.display        = tab === 'tunnel'   ? '' : 'none';
+  document.getElementById('socks-log-box').style.display  = tab === 'socks'    ? '' : 'none';
+  document.getElementById('routing-log-box').style.display = tab === 'routing' ? '' : 'none';
 
   // Фильтр показываем только для туннеля
   document.getElementById('log-filter-row').style.display = tab === 'tunnel' ? '' : 'none';

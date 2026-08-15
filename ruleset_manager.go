@@ -59,6 +59,7 @@ type RulesetManager struct {
 	geoip      map[string]*GeoIPGroup
 	loaded     bool
 	lastUpdate time.Time
+	logFn      func(msg, lv string)
 }
 
 func NewRulesetManager(baseDir string) *RulesetManager {
@@ -66,6 +67,22 @@ func NewRulesetManager(baseDir string) *RulesetManager {
 		cacheDir: filepath.Join(baseDir, "rulesets"),
 		geosite:  make(map[string]*GeositeGroup),
 		geoip:    make(map[string]*GeoIPGroup),
+	}
+}
+
+// SetLogFn задаёт функцию логирования (например, отправка события в UI).
+func (m *RulesetManager) SetLogFn(fn func(msg, lv string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logFn = fn
+}
+
+// log отправляет сообщение через logFn, если он задан. Вызывается только при
+// удержании m.mu или до старта конкурентных горутин (logFn задаётся один раз
+// при старте), поэтому читается без блокировки.
+func (m *RulesetManager) log(msg, lv string) {
+	if m.logFn != nil {
+		m.logFn(msg, lv)
 	}
 }
 
@@ -78,25 +95,36 @@ func (m *RulesetManager) UpdateRulesets() error {
 	defer m.mu.Unlock()
 
 	if err := os.MkdirAll(m.cacheDir, 0o755); err != nil {
+		m.log("Маршрутизация: не удалось создать кеш-папку "+m.cacheDir+": "+err.Error(), "error")
 		return fmt.Errorf("кеш-папка: %w", err)
 	}
+	m.log("Маршрутизация: кеш-папка готова: "+m.cacheDir, "info")
 
 	geositePath := filepath.Join(m.cacheDir, "geosite.dat")
 	geoipPath := filepath.Join(m.cacheDir, "geoip.dat")
 
+	m.log("Маршрутизация: скачиваю geosite.dat (" + defaultGeositeURL + ") ...", "info")
 	if err := downloadFile(defaultGeositeURL, geositePath); err != nil {
+		m.log("Маршрутизация: не удалось скачать geosite.dat: "+err.Error(), "error")
 		return fmt.Errorf("geosite.dat: %w", err)
 	}
+	m.log("Маршрутизация: geosite.dat сохранён в "+geositePath, "info")
+
+	m.log("Маршрутизация: скачиваю geoip.dat (" + defaultGeoIPURL + ") ...", "info")
 	if err := downloadFile(defaultGeoIPURL, geoipPath); err != nil {
+		m.log("Маршрутизация: не удалось скачать geoip.dat: "+err.Error(), "error")
 		return fmt.Errorf("geoip.dat: %w", err)
 	}
+	m.log("Маршрутизация: geoip.dat сохранён в "+geoipPath, "info")
 
 	gs, err := parseGeositeFile(geositePath)
 	if err != nil {
+		m.log("Маршрутизация: ошибка парсинга geosite.dat: "+err.Error(), "error")
 		return fmt.Errorf("парсинг geosite: %w", err)
 	}
 	gi, err := parseGeoIPFile(geoipPath)
 	if err != nil {
+		m.log("Маршрутизация: ошибка парсинга geoip.dat: "+err.Error(), "error")
 		return fmt.Errorf("парсинг geoip: %w", err)
 	}
 
@@ -104,6 +132,7 @@ func (m *RulesetManager) UpdateRulesets() error {
 	m.geoip = gi
 	m.loaded = true
 	m.lastUpdate = time.Now()
+	m.log("Маршрутизация: правила обновлены ("+fmt.Sprintf("%d", len(gs))+" групп geosite, "+fmt.Sprintf("%d", len(gi))+" групп geoip).", "success")
 	return nil
 }
 
@@ -119,8 +148,8 @@ func (m *RulesetManager) EnsureLoaded() error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.loaded {
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -136,12 +165,18 @@ func (m *RulesetManager) EnsureLoaded() error {
 			if fi, err := os.Stat(geositePath); err == nil {
 				m.lastUpdate = fi.ModTime()
 			}
+			m.mu.Unlock()
+			m.log("Маршрутизация: правила загружены из кеша: "+m.cacheDir, "info")
 			return nil
 		}
 	}
+	m.mu.Unlock()
 
-	// Кеша нет — скачиваем.
+	// Кеша нет — скачиваем (без удержания блокировки, чтобы не было взаимоблокировки
+	// с UpdateRulesets, который сам берёт m.mu).
+	m.log("Маршрутизация: локального кеша нет — скачиваю правила...", "info")
 	if err := m.UpdateRulesets(); err != nil {
+		m.log("Маршрутизация: не удалось загрузить правила: "+err.Error(), "error")
 		return err
 	}
 	return nil

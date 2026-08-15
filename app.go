@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.1"
+const AppVersion = "0.2.5.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -200,6 +200,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// Настраиваем маршрутизацию: менеджер правил и текущий список правил прокси.
 	a.ruleset = NewRulesetManager(a.baseDir)
+	a.ruleset.SetLogFn(a.routingLog)
 	if a.proxy != nil {
 		a.proxy.SetRulesetManager(a.ruleset)
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
@@ -207,7 +208,7 @@ func (a *App) startup(ctx context.Context) {
 	// Асинхронно подгружаем правила (из кеша или сети).
 	go func() {
 		if err := a.ruleset.EnsureLoaded(); err != nil {
-			a.socksLog("Роутинг: правила не загружены: "+err.Error(), "warn")
+			a.routingLog("Маршрутизация: правила не загружены: "+err.Error(), "warn")
 		}
 	}()
 
@@ -463,6 +464,11 @@ func (a *App) onProxyStats(stats ProxyStats) {
 func (a *App) deployLog(msg, lv string) {
 	ts := time.Now().Format("15:04:05")
 	runtime.EventsEmit(a.ctx, "deploy:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+}
+
+func (a *App) routingLog(msg, lv string) {
+	ts := time.Now().Format("15:04:05")
+	runtime.EventsEmit(a.ctx, "routing:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
 
 // ── Tunnel API ────────────────────────────────────────────────────────────────
@@ -1213,6 +1219,7 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 	a.cfg.Rulesets = filtered
 	a.cfgMu.Unlock()
 	a.persistConfig()
+	a.routingLog(fmt.Sprintf("Маршрутизация: сохранено %d правил.", len(filtered)), "info")
 	return ""
 }
 
@@ -1235,14 +1242,15 @@ func (a *App) UpdateRulesets() string {
 		return "роутинг не инициализирован"
 	}
 	if err := a.ruleset.UpdateRulesets(); err != nil {
-		a.socksLog("Роутинг: ошибка обновления правил: "+err.Error(), "error")
+		a.routingLog("Маршрутизация: ошибка обновления правил: "+err.Error(), "error")
 		return err.Error()
 	}
 	// Применяем правила к работающему прокси.
 	if a.proxy != nil {
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
+		a.routingLog(fmt.Sprintf("Маршрутизация: применено %d правил к прокси.", len(a.getCfg().Rulesets)), "info")
 	}
-	a.socksLog("Роутинг: правила обновлены.", "success")
+	a.routingLog("Маршрутизация: правила обновлены.", "success")
 	return ""
 }
 
@@ -1260,6 +1268,9 @@ func (a *App) EnsureRulesetsLoaded() string {
 	}
 	if a.proxy != nil {
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
+	}
+	if n := len(a.getCfg().Rulesets); n > 0 {
+		a.routingLog(fmt.Sprintf("Маршрутизация: правила загружены, применено %d правил к прокси.", n), "info")
 	}
 	return ""
 }
