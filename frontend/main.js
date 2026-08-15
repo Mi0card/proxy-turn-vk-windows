@@ -862,11 +862,11 @@ function renderRuleSuggest() {
   if (filteredGeosite.length === 0 && filteredGeoip.length === 0) {
     // Если групп нет (например, правила ещё не загружены), показываем сообщение
     if (state.rulesetGroups.geosite.length === 0 && state.rulesetGroups.geoip.length === 0) {
-      html = `<div class="rr-suggest-item" style="cursor: default; background: #f8fafc; color: #64748b;">
+      html = `<div class="rr-suggest-item rr-suggest-empty">
         Сначала скачайте правила — «Обновить правила»
       </div>`;
     } else {
-      html = `<div class="rr-suggest-item" style="cursor: default; background: #f8fafc; color: #64748b;">
+      html = `<div class="rr-suggest-item rr-suggest-empty">
         Нет подходящих групп
       </div>`;
     }
