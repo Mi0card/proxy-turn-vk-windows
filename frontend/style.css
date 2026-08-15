@@ -386,6 +386,15 @@ body { display: flex; flex-direction: column; }
 .proxy-status.disconnected { color: var(--fg2); }
 .proxy-status.connected    { color: var(--success); }
 
+.routing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.routing-head .proxy-status { margin-bottom: 0; }
+
 .hint-box {
   background: var(--bg2);
   border-radius: var(--radius);

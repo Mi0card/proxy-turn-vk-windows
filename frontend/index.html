@@ -185,12 +185,15 @@
 
   <!-- Роутинг -->
   <section id="tab-routing" class="tab-panel hidden">
-    <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
+    <div class="routing-head">
+      <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
+      <button id="btn-rules-update" class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+    </div>
 
     <div class="card">
       <div class="card-title">Правила маршрутизации</div>
       <p class="hint hint--spaced">
-        Формат: <code>ruleset:geosite-category-ru</code>, <code>ruleset:geosite-youtube</code>, <code>ruleset:geoip-private</code>.
+        Формат: <code>geosite-category-ru</code>, <code>geosite-youtube</code>, <code>geoip-private</code>.
         Правила применяются сверху вниз — первое совпадение выигрывает.
         Политики: <b>block</b> (заблокировать), <b>direct</b> (напрямую, в обход туннеля),
         <b>proxy</b> (через туннель).
@@ -200,9 +203,8 @@
         <input id="rr-new" type="text" class="inp mono" placeholder="geosite-category-ru">
         <datalist id="ruleset-options"></datalist>
         <button class="btn btn-primary btn-sm" onclick="addRoutingRule()">+ Добавить</button>
-        <button class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+        <div id="rr-suggest" class="rr-suggest" style="display:none"></div>
       </div>
-      <div id="rr-suggest" class="rr-suggest" style="display:none"></div>
     </div>
 
     <div id="ruleset-list" class="ruleset-list">

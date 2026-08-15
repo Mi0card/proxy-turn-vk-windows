@@ -42,6 +42,7 @@ function setBusy(btn, busy, busyText) {
     btn.classList.add('is-busy');
   } else {
     if (btn.dataset.label) btn.textContent = btn.dataset.label;
+    btn.disabled = false;
     btn.classList.remove('is-busy');
   }
   // Обновляем статус бадж для отображения загрузки
@@ -78,7 +79,6 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('socks:status', onSocksStatus);
   window.runtime.EventsOn('socks:stats', onSocksStats);
   window.runtime.EventsOn('socks:log', onSocksLog);
-  window.runtime.EventsOn('routing:log', onRoutingLog);
   window.runtime.EventsOn('routing:log', onRoutingLog);
   window.runtime.EventsOn('tunnel:stats', onTunnelStats);
   window.runtime.EventsOn('tunnel:ping',  onTunnelPing);
@@ -599,31 +599,6 @@ function onRoutingLog(entry) {
   routingLog(entry.msg, entry.lv);
 }
 
-// ── Лог маршрутизации (ruleset) ───────────────────────────────────────────
-
-// Отдельный лог для маршрутизации (правила, скачивание/обновление дата-файлов).
-function routingLog(msg, lv = 'info') {
-  const ts = new Date().toLocaleTimeString('ru', {hour12: false});
-  const entry = {ts, msg, lv};
-  state.routingEntries.push(entry);
-  appendRoutingLine(entry);
-}
-
-function appendRoutingLine({ts, msg, lv}) {
-  const box = document.getElementById('routing-log-box');
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
-  box.appendChild(line);
-  if (state.activeTab === 'logs' && state.activeLogTab === 'routing') {
-    box.scrollTop = box.scrollHeight;
-  }
-}
-
-// Получаем отдельные события лога маршрутизации
-function onRoutingLog(entry) {
-  routingLog(entry.msg, entry.lv);
-}
-
 function toggleAuth() {
   const show = document.getElementById('px-use-auth').checked;
   document.getElementById('auth-fields').style.display = show ? '' : 'none';
@@ -869,7 +844,7 @@ function renderRuleSuggest() {
     filteredGeosite.forEach((group, index) => {
       html += `<div class="rr-suggest-item" data-index="${index}" data-type="geosite" data-value="${group}">
         <span class="rr-type">geosite-</span>
-        ${group.substring(7)}
+        ${group.substring(8)}
       </div>`;
     });
   }
@@ -879,7 +854,7 @@ function renderRuleSuggest() {
     filteredGeoip.forEach((group, index) => {
       html += `<div class="rr-suggest-item" data-index="${index}" data-type="geoip" data-value="${group}">
         <span class="rr-type">geoip-</span>
-        ${group.substring(5)}
+        ${group.substring(6)}
       </div>`;
     });
   }
@@ -975,7 +950,7 @@ function onRuleInput() {
 }
 
 async function updateAllRulesets() {
-  const btn = document.querySelector('#tab-routing .btn');
+  const btn = document.getElementById('btn-rules-update');
   setBusy(btn, true, '…  Обновление');
   try {
     const err = await window.go.main.App.UpdateRulesets();
