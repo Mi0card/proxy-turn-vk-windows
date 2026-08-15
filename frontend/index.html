@@ -36,6 +36,7 @@
 <nav class="tabs">
   <button class="tab active" data-tab="connect" aria-label="Вкладка подключение">Подключение</button>
   <button class="tab" data-tab="proxy" aria-label="Вкладка прокси">Proxy</button>
+  <button class="tab" data-tab="routing" aria-label="Вкладка маршрутизация">Маршрутизация</button>
   <button class="tab" data-tab="logs" aria-label="Вкладка логи">Логи</button>
   <button class="tab" data-tab="wg" aria-label="Вкладка WireGuard">WireGuard</button>
   <button class="tab" data-tab="deploy" aria-label="Вкладка деплой">Deploy</button>
@@ -180,6 +181,34 @@
     </div>
 
     <div id="proxy-hint" class="hint-box" style="display:none"></div>
+  </section>
+
+  <!-- Роутинг -->
+  <section id="tab-routing" class="tab-panel hidden">
+    <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
+
+    <div class="card">
+      <div class="card-title">Правила маршрутизации</div>
+      <p class="hint hint--spaced">
+        Формат: <code>ruleset:geosite-category-ru</code>, <code>ruleset:geosite-youtube</code>, <code>ruleset:geoip-private</code>.
+        Правила применяются сверху вниз — первое совпадение выигрывает.
+        Политики: <b>block</b> (заблокировать), <b>direct</b> (напрямую, в обход туннеля),
+        <b>proxy</b> (через туннель).
+      </p>
+      <div class="row-flex">
+        <input id="rr-new" type="text" class="inp mono" placeholder="ruleset:geosite-category-ru">
+        <button class="btn btn-primary btn-sm" onclick="addRoutingRule()">+ Добавить</button>
+        <button class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+      </div>
+    </div>
+
+    <div id="ruleset-list" class="ruleset-list">
+      <!-- Динамический список правил -->
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="saveRoutingRules()">💾 Сохранить</button>
+    </div>
   </section>
 
   <!-- Deploy -->

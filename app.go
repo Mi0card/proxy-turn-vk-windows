@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.4.4"
+const AppVersion = "0.2.5.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,7 @@ type Config struct {
 	PxUser      string `json:"px_user"`
 	PxPass      string `json:"px_pass"`
 	Theme       string `json:"theme"`
+	Rulesets    []RulesetConfig `json:"rulesets"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -124,6 +125,9 @@ type App struct {
 		total  int
 	}
 
+	// Маршрутизация по правилам (ruleset)
+	ruleset *RulesetManager
+
 	// Конфиг
 	cfg Config
 }
@@ -163,12 +167,16 @@ func extractClientExe(data []byte) (string, error) {
 func NewAppWithExe(exePath string) *App {
 	a := &App{overrideClientExe: exePath}
 	a.proxy = NewProxyServer(a.socksLog, a.onProxyStats)
+	a.ruleset = NewRulesetManager(a.baseDir)
+	a.proxy.SetRulesetManager(a.ruleset)
 	return a
 }
 
 func NewApp() *App {
 	a := &App{}
 	a.proxy = NewProxyServer(a.socksLog, a.onProxyStats)
+	a.ruleset = NewRulesetManager(a.baseDir)
+	a.proxy.SetRulesetManager(a.ruleset)
 	return a
 }
 
@@ -179,6 +187,7 @@ func (a *App) startup(ctx context.Context) {
 	exe, _ := os.Executable()
 	a.baseDir = filepath.Dir(exe)
 	a.configFile = filepath.Join(a.baseDir, "windtt_config.json")
+	a.ruleset = NewRulesetManager(a.baseDir)
 
 	if a.overrideClientExe != "" {
 		a.clientExe = a.overrideClientExe
@@ -188,6 +197,19 @@ func (a *App) startup(ctx context.Context) {
 
 	// Загружаем конфиг
 	a.loadConfig()
+
+	// Настраиваем маршрутизацию: менеджер правил и текущий список правил прокси.
+	a.ruleset = NewRulesetManager(a.baseDir)
+	if a.proxy != nil {
+		a.proxy.SetRulesetManager(a.ruleset)
+		a.proxy.SetRulesets(a.cfg.Rulesets)
+	}
+	// Асинхронно подгружаем правила (из кеша или сети).
+	go func() {
+		if err := a.ruleset.EnsureLoaded(); err != nil {
+			a.socksLog("Роутинг: правила не загружены: "+err.Error(), "warn")
+		}
+	}()
 
 	// Крэш-восстановление: если остался бэкап системного прокси, значит прошлый
 	// сеанс завершился аварийно с включённым перенаправлением — возвращаем настройки.
@@ -1104,6 +1126,10 @@ func (a *App) SocksStart(host, port, user, pwd string) string {
 }
 
 func (a *App) ProxyStart(host, socks5Port, httpPort, user, pwd string, useAuth bool) string {
+	// Применяем текущие правила маршрутизации к прокси.
+	if a.proxy != nil {
+		a.proxy.SetRulesets(a.cfg.Rulesets)
+	}
 	if err := a.proxy.Start(host, socks5Port, httpPort, useAuth, user, pwd); err != nil {
 		return err.Error()
 	}
@@ -1123,6 +1149,94 @@ func (a *App) SocksStatus() bool {
 func (a *App) SocksStats() SocksStatsResult {
 	stats := ProxyStats{Active: int(atomic.LoadInt32(&a.proxy.active))}
 	return SocksStatsResult{Active: stats.Active}
+}
+
+// ── Ruleset API (маршрутизация) ─────────────────────────────────────────────
+
+type RulesetStatus struct {
+	Loaded     bool   `json:"loaded"`
+	LastUpdate int64  `json:"last_update"` // unix ms, 0 если никогда
+	Error      string `json:"error"`
+}
+
+// GetRulesets возвращает текущий список правил маршрутизации.
+func (a *App) GetRulesets() []RulesetConfig {
+	if a.cfg.Rulesets == nil {
+		return []RulesetConfig{}
+	}
+	return a.cfg.Rulesets
+}
+
+// SetRulesets сохраняет список правил (с валидацией) в конфиг.
+// Возвращает "" при успехе, иначе текст ошибки.
+func (a *App) SetRulesets(configs []RulesetConfig) string {
+	filtered := make([]RulesetConfig, 0, len(configs))
+	for _, rc := range configs {
+		if rc.Rule == "" {
+			continue
+		}
+		if !validateRule(rc.Rule) {
+			return "Некорректное правило: " + rc.Rule + " (ожидается ruleset:geosite-... или ruleset:geoip-...)"
+		}
+		if !validPolicy(rc.Policy) {
+			return "Некорректная политика: " + rc.Policy + " (допустимо: block, direct, proxy)"
+		}
+		if rc.Policy == "" {
+			rc.Policy = PolicyProxy
+		}
+		filtered = append(filtered, rc)
+	}
+	a.cfg.Rulesets = filtered
+	a.persistConfig()
+	return ""
+}
+
+// GetRulesetStatus возвращает статус загруженных правил.
+func (a *App) GetRulesetStatus() RulesetStatus {
+	if a.ruleset == nil {
+		return RulesetStatus{}
+	}
+	last := a.ruleset.LastUpdate()
+	return RulesetStatus{
+		Loaded:     a.ruleset.Loaded(),
+		LastUpdate: last.UnixMilli(),
+	}
+}
+
+// UpdateRulesets скачивает и перечитывает geosite.dat / geoip.dat.
+// Возвращает "" при успехе, иначе текст ошибки.
+func (a *App) UpdateRulesets() string {
+	if a.ruleset == nil {
+		return "роутинг не инициализирован"
+	}
+	if err := a.ruleset.UpdateRulesets(); err != nil {
+		a.socksLog("Роутинг: ошибка обновления правил: "+err.Error(), "error")
+		return err.Error()
+	}
+	// Применяем правила к работающему прокси.
+	if a.proxy != nil {
+		a.proxy.SetRulesets(a.cfg.Rulesets)
+	}
+	a.socksLog("Роутинг: правила обновлены.", "success")
+	return ""
+}
+
+// EnsureRulesetsLoaded гарантирует, что правила загружены (из кеша или сети).
+// Возвращает "" при успехе или когда роутинг не настроен.
+func (a *App) EnsureRulesetsLoaded() string {
+	if a.ruleset == nil {
+		return ""
+	}
+	if len(a.cfg.Rulesets) == 0 {
+		return ""
+	}
+	if err := a.ruleset.EnsureLoaded(); err != nil {
+		return err.Error()
+	}
+	if a.proxy != nil {
+		a.proxy.SetRulesets(a.cfg.Rulesets)
+	}
+	return ""
 }
 
 

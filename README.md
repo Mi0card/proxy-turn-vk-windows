@@ -16,6 +16,7 @@ GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
 - Подключение по `wdtt://` ссылке или вручную
 - SOCKS5 + HTTP прокси с авторизацией через WireGuard userspace (gvisor netstack), без прав администратора
 - **Системный прокси** — чекбокс в шапке, перенаправляет WinINET-трафик (Chrome, Edge, Office) через туннель. Отдельный HTTP-прокси на случайном порту, без auth, без прав администратора
+- **Маршрутизация по правилам** — вкладка «Маршрутизация»: правила вида `ruleset:geosite-<группа>` / `ruleset:geoip-<группа>` с политиками block / direct / proxy
 - SSH деплой `wdtt-server` на VPS с проверкой fingerprint
 - Авто-загрузка WireGuard конфига, статус-бар с пингом через туннель
 - Светлая / тёмная тема
@@ -30,6 +31,26 @@ GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
 - Требуется активный туннель. Без него запросы браузеров будут отклоняться (502).
 - Прав администратора не требуется.
 - При закрытии или аварийном завершении приложения настройки восстанавливаются автоматически.
+
+## Маршрутизация по правилам
+
+Вкладка **Маршрутизация** позволяет направлять трафик по правилам (аналогично приложению Throne). Правило задаётся в формате `ruleset:<тип>-<группа>` и может ссылаться на любую группу из скачанных дата-файлов:
+
+- `ruleset:geosite-category-ru` — домены группы `CATEGORY-RU` из geosite.dat
+- `ruleset:geosite-youtube` — домены группы `YOUTUBE` из geosite.dat
+- `ruleset:geoip-private` — подсети группы `PRIVATE` из geoip.dat
+
+Список групп не ограничен примерами — можно использовать любую группу из geosite.dat / geoip.dat.
+
+Каждому правилу задаётся политика:
+
+- **block** — заблокировать соединение (403 / отклонение SOCKS5)
+- **direct** — напрямую, в обход туннеля
+- **proxy** — через туннель (по умолчанию)
+
+Правила применяются сверху вниз — выигрывает первое совпадение.
+
+Дата-файлы скачиваются и кешируются из [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat) (кнопка **Обновить правила** на вкладке). Парсер работает с бинарным protobuf-форматом (v2fly) без дополнительных зависимостей.
 
 ## Сборка
 
@@ -75,6 +96,7 @@ networksetup -setsocksfirewallproxy Wi-Fi 127.0.0.1 1080
 proxy-turn-vk-windows/
 ├── app.go               ← backend: туннель, деплой, конфиг
 ├── proxy.go             ← SOCKS5 + HTTP прокси, WireGuard netstack
+├── ruleset_manager.go   ← маршрутизация по правилам (geosite/geoip)
 ├── system_proxy.go      ← системный прокси (WinINET)
 ├── syscall_windows.go   ← WinINET: реестр + InternetSetOption
 ├── syscall_unix.go      ← заглушки для кросс-компиляции

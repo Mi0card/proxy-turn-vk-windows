@@ -123,6 +123,11 @@ function switchTab(name) {
       : document.getElementById('log-box');
     if (box) box.scrollTop = box.scrollHeight;
   }
+  // При открытии роутинга — загружаем правила
+  if (name === 'routing' && !state.routingLoaded) {
+    state.routingLoaded = true;
+    loadRoutingTab();
+  }
 }
 
 // ── Конфиг ────────────────────────────────────────────────────────────────────
@@ -561,6 +566,138 @@ function genDeployPass() {
   setVal('d-tunnel-pwd', p);
 }
 
+// ── Роутинг (ruleset-based routing) ───────────────────────────────────────
+
+// Текущий список правил в редакторе (до сохранения).
+let routingDraft = [];
+
+function routingPolicyLabel(p) {
+  switch (p) {
+    case 'block':  return 'block (заблокировать)';
+    case 'direct': return 'direct (напрямую)';
+    case 'proxy':  return 'proxy (через туннель)';
+    default:       return 'proxy (через туннель)';
+  }
+}
+
+function routingRuleType(rule) {
+  const r = (rule || '').replace(/^ruleset:/, '');
+  const idx = r.indexOf('-');
+  if (idx < 0) return r;
+  return r.slice(0, idx);
+}
+
+function routingRuleGroup(rule) {
+  const r = (rule || '').replace(/^ruleset:/, '');
+  const idx = r.indexOf('-');
+  if (idx < 0) return '';
+  return r.slice(idx + 1);
+}
+
+function renderRoutingList() {
+  const container = document.getElementById('ruleset-list');
+  if (!container) return;
+  if (!routingDraft.length) {
+    container.innerHTML = '<p class="hint">Правил пока нет. Добавьте правило выше.</p>';
+    return;
+  }
+  container.innerHTML = routingDraft.map((rs, i) => `
+    <div class="ruleset-item">
+      <input type="checkbox" class="rr-enable" data-i="${i}" ${rs.enable ? 'checked' : ''} title="Включить правило">
+      <span class="ruleset-type">${routingRuleType(rs.rule)}</span>
+      <span class="ruleset-group mono">${escHtml(routingRuleGroup(rs.rule) || rs.rule)}</span>
+      <select class="sel rr-policy" data-i="${i}" title="Политика">
+        <option value="proxy"  ${rs.policy === 'proxy'  ? 'selected' : ''}>proxy</option>
+        <option value="direct" ${rs.policy === 'direct' ? 'selected' : ''}>direct</option>
+        <option value="block"  ${rs.policy === 'block'  ? 'selected' : ''}>block</option>
+      </select>
+      <button class="btn btn-sm rr-up"   data-i="${i}" title="Вверх">↑</button>
+      <button class="btn btn-sm rr-down" data-i="${i}" title="Вниз">↓</button>
+      <button class="btn btn-sm rr-del"  data-i="${i}" title="Удалить">✕</button>
+    </div>
+  `).join('');
+
+  // Обработчики
+  container.querySelectorAll('.rr-enable').forEach(el => {
+    el.addEventListener('change', () => { const i = +el.dataset.i; if (routingDraft[i]) routingDraft[i].enable = el.checked; });
+  });
+  container.querySelectorAll('.rr-policy').forEach(el => {
+    el.addEventListener('change', () => { const i = +el.dataset.i; if (routingDraft[i]) routingDraft[i].policy = el.value; });
+  });
+  container.querySelectorAll('.rr-up').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i > 0) { const t = routingDraft[i-1]; routingDraft[i-1] = routingDraft[i]; routingDraft[i] = t; renderRoutingList(); } });
+  });
+  container.querySelectorAll('.rr-down').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i < routingDraft.length - 1) { const t = routingDraft[i+1]; routingDraft[i+1] = routingDraft[i]; routingDraft[i] = t; renderRoutingList(); } });
+  });
+  container.querySelectorAll('.rr-del').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; routingDraft.splice(i, 1); renderRoutingList(); });
+  });
+}
+
+async function loadRoutingTab() {
+  const [rulesets, status] = await Promise.all([
+    window.go.main.App.GetRulesets(),
+    window.go.main.App.GetRulesetStatus(),
+  ]);
+  routingDraft = (rulesets || []).map(r => ({ rule: r.rule, policy: r.policy || 'proxy', enable: r.enable }));
+  renderRoutingList();
+  updateRoutingStatus(status);
+}
+
+function updateRoutingStatus(status) {
+  const el = document.getElementById('routing-status');
+  if (!el) return;
+  if (status && status.loaded) {
+    const when = status.last_update ? new Date(status.last_update).toLocaleString('ru') : 'неизвестно';
+    el.textContent = '● Правила загружены (обновлены: ' + when + ')';
+    el.className = 'proxy-status connected';
+  } else if (routingDraft.length) {
+    el.textContent = '● Правила не загружены — нажмите «Обновить правила», чтобы скачать geosite/geoip';
+    el.className = 'proxy-status disconnected';
+  } else {
+    el.textContent = '● Правил нет — маршрутизация неактивна';
+    el.className = 'proxy-status disconnected';
+  }
+}
+
+function addRoutingRule() {
+  const inp = document.getElementById('rr-new');
+  const rule = (inp.value || '').trim();
+  if (!rule) { showToast('Введите правило!'); return; }
+  routingDraft.push({ rule, policy: 'proxy', enable: true });
+  inp.value = '';
+  renderRoutingList();
+}
+
+async function saveRoutingRules() {
+  const configs = routingDraft.map(r => ({ rule: r.rule, policy: r.policy, enable: r.enable }));
+  const err = await window.go.main.App.SetRulesets(configs);
+  if (err) { showToast('Роутинг: ' + err); socksLog('Роутинг: ' + err, 'error'); return; }
+  // Убеждаемся, что правила загружены и применены к прокси.
+  await window.go.main.App.EnsureRulesetsLoaded();
+  log('Правила маршрутизации сохранены.', 'success');
+  const status = await window.go.main.App.GetRulesetStatus();
+  updateRoutingStatus(status);
+}
+
+async function updateAllRulesets() {
+  const btn = document.querySelector('#tab-routing .btn');
+  setBusy(btn, true, '…  Обновление');
+  try {
+    const err = await window.go.main.App.UpdateRulesets();
+    if (err) { showToast('Роутинг: ' + err); socksLog('Роутинг: ' + err, 'error'); }
+    const status = await window.go.main.App.GetRulesetStatus();
+    updateRoutingStatus(status);
+  } catch (e) {
+    socksLog('Роутинг: ' + e, 'error');
+    showToast('Роутинг: ' + e);
+  } finally {
+    setBusy(btn, false);
+  }
+}
+
+
 // ── Deploy ────────────────────────────────────────────────────────────────────
 
 async function deploy() {
@@ -939,6 +1076,22 @@ PROXY (SOCKS5 + HTTP)
   
   Firefox: Настройки → Сеть → Ручная настройка прокси
   Chrome:  расширение Proxy SwitchyOmega
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+МАРШРУТИЗАЦИЯ (по правилам)
+  Задаёт, куда направлять трафик по правилам:
+    ruleset:geosite-<группа>  — домены из geosite
+    ruleset:geoip-<группа>    — подсети из geoip
+  Примеры:
+    ruleset:geosite-category-ru → proxy
+    ruleset:geosite-youtube     → block
+    ruleset:geoip-private       → direct
+  Политики: block (заблокировать),
+    direct (напрямую в обход туннеля),
+    proxy (через туннель).
+  Правила применяются сверху вниз — первое совпадение.
+  Кнопка «Обновить правила» скачивает geosite/geoip
+  из runetfreedom/russia-v2ray-rules-dat.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DEPLOY

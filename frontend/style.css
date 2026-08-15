@@ -248,6 +248,48 @@ body { display: flex; flex-direction: column; }
   min-width: 90px;
 }
 
+/* ── Routing (ruleset) ── */
+.ruleset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ruleset-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--bg3);
+  border-radius: var(--radius);
+}
+.ruleset-item input[type="checkbox"] {
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+.ruleset-type {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--blue);
+  background: rgba(56,189,248,.12);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.ruleset-group {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ruleset-item .rr-policy {
+  min-width: 110px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
 /* ── Buttons ── */
 .btn {
   padding: 6px 16px;
@@ -537,6 +579,9 @@ body.light .btn-stop    { background: #dc2626; color: #fff; }
 
 body.light .wg-conf  { background: #ffffff; border-color: #94a3b8; color: #0f172a; }
 body.light .help-text { color: #0f172a; }
+
+body.light .ruleset-item { background: #ffffff; border-color: #e2e8f0; }
+body.light .ruleset-type { color: var(--blue); background: rgba(37,99,235,.1); }
 
 body.light ::-webkit-scrollbar-track { background: #f1f5f9; }
 body.light ::-webkit-scrollbar-thumb { background: #cbd5e1; }

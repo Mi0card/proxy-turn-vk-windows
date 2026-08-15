@@ -251,12 +251,78 @@ type ProxyServer struct {
 	logFn    func(msg, lv string)
 	statsFn  func(ProxyStats)
 
+	// Маршрутизация по правилам
+	rulesetMu  sync.RWMutex
+	rulesets   []RulesetConfig
+	rulesetMgr *RulesetManager
+
 	active int32 // атомарный счётчик активных соединений
 	total  int32 // всего соединений за сессию
 }
 
 func NewProxyServer(logFn func(msg, lv string), statsFn func(ProxyStats)) *ProxyServer {
 	return &ProxyServer{logFn: logFn, statsFn: statsFn}
+}
+
+// SetRulesets задаёт текущий список правил маршрутизации.
+func (p *ProxyServer) SetRulesets(configs []RulesetConfig) {
+	p.rulesetMu.Lock()
+	defer p.rulesetMu.Unlock()
+	p.rulesets = append([]RulesetConfig(nil), configs...)
+}
+
+// SetRulesetManager задаёт менеджер правил (загруженные geosite/geoip).
+func (p *ProxyServer) SetRulesetManager(m *RulesetManager) {
+	p.rulesetMu.Lock()
+	defer p.rulesetMu.Unlock()
+	p.rulesetMgr = m
+}
+
+func (p *ProxyServer) getRulesets() []RulesetConfig {
+	p.rulesetMu.RLock()
+	defer p.rulesetMu.RUnlock()
+	return p.rulesets
+}
+
+func (p *ProxyServer) getRulesetMgr() *RulesetManager {
+	p.rulesetMu.RLock()
+	defer p.rulesetMu.RUnlock()
+	return p.rulesetMgr
+}
+
+// ruleResult — результат применения правил маршрутизации к хосту.
+type ruleResult struct {
+	policy string // block | direct | proxy | ""
+	rule   string
+}
+
+// route определяет политику маршрутизации для хоста.
+func (p *ProxyServer) route(host string) ruleResult {
+	m := p.getRulesetMgr()
+	if m == nil {
+		return ruleResult{}
+	}
+	configs := p.getRulesets()
+	if len(configs) == 0 {
+		return ruleResult{}
+	}
+	var res ruleResult
+	m.MatchRules(configs, host, func(match RoutingMatch) bool {
+		res.policy = match.Policy
+		res.rule = match.Rule
+		// Порядок правил = приоритет: останавливаемся на первом совпадении.
+		return true
+	})
+	return res
+}
+
+// dialForRoute открывает соединение согласно политике маршрутизации.
+// proxy (default) → через туннель; direct → напрямую.
+func (p *ProxyServer) dialForRoute(policy, network, addr string) (net.Conn, error) {
+	if policy == PolicyDirect {
+		return net.DialTimeout(network, addr, 30*time.Second)
+	}
+	return wgDial(network, addr)
 }
 
 func (p *ProxyServer) connOpen() {
@@ -434,9 +500,17 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	if _, err := io.ReadFull(c, portBuf); err != nil { return }
 	target := fmt.Sprintf("%s:%d", host, binary.BigEndian.Uint16(portBuf))
 
+	// Маршрутизация по правилам.
+	route := p.route(host)
+	if route.policy == PolicyBlock {
+		c.Write([]byte{5, 2, 0, 1, 0, 0, 0, 0, 0, 0}) // not allowed
+		p.log(fmt.Sprintf("→ %s  [заблокировано %s]", target, route.rule), "warn")
+		return
+	}
+
 	c.SetDeadline(time.Time{})
 	start := time.Now()
-	remote, err := wgDial("tcp", target)
+	remote, err := p.dialForRoute(route.policy, "tcp", target)
 	if err != nil {
 		c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
 		p.log(fmt.Sprintf("→ %s: ошибка: %s", target, err), "warn")
@@ -444,7 +518,9 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	}
 
 	c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
-	p.log(fmt.Sprintf("→ %s  [%dms]", target, time.Since(start).Milliseconds()), "dim")
+	via := "туннель"
+	if route.policy == PolicyDirect { via = "напрямую" }
+	p.log(fmt.Sprintf("→ %s  [%dms, %s]", target, time.Since(start).Milliseconds(), via), "dim")
 
 	// П.6 — context для graceful cancel обеих горутин
 	ctx, cancel := context.WithCancel(context.Background())
@@ -496,7 +572,15 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		p.connOpen()
 		defer p.connClose()
 
-		remote, err := wgDial("tcp", r.Host)
+		// Маршрутизация по правилам.
+		route := p.route(r.Host)
+		if route.policy == PolicyBlock {
+			http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
+			p.log(fmt.Sprintf("→ %s [CONNECT]  [заблокировано %s]", r.Host, route.rule), "warn")
+			return
+		}
+
+		remote, err := p.dialForRoute(route.policy, "tcp", r.Host)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			p.log(fmt.Sprintf("→ %s: ошибка: %s", r.Host, err), "warn")
@@ -504,7 +588,9 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		}
 		defer remote.Close()
 		w.WriteHeader(http.StatusOK)
-		p.log(fmt.Sprintf("→ %s [CONNECT]", r.Host), "dim")
+		via := "туннель"
+		if route.policy == PolicyDirect { via = "напрямую" }
+		p.log(fmt.Sprintf("→ %s [CONNECT, %s]", r.Host, via), "dim")
 
 		hj, ok := w.(http.Hijacker)
 		if !ok { return }
@@ -528,6 +614,14 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	p.connOpen()
 	defer p.connClose()
 
+	// Маршрутизация по правилам.
+	route := p.route(r.URL.Host)
+	if route.policy == PolicyBlock {
+		http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
+		p.log(fmt.Sprintf("→ %s %s  [заблокировано %s]", r.Method, r.URL.Host, route.rule), "warn")
+		return
+	}
+
 	r.RequestURI = ""
 	// Удаляем hop-by-hop заголовки (RFC 2616 §13.5.1) — они не должны
 	// пересылаться через прокси.
@@ -538,9 +632,11 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	} {
 		r.Header.Del(h)
 	}
+	via := "туннель"
+	if route.policy == PolicyDirect { via = "напрямую" }
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return wgDial(network, addr)
+			return p.dialForRoute(route.policy, network, addr)
 		},
 	}
 	resp, err := transport.RoundTrip(r)
@@ -554,7 +650,7 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
-	p.log(fmt.Sprintf("→ %s %s", r.Method, r.URL.Host), "dim")
+	p.log(fmt.Sprintf("→ %s %s [%s]", r.Method, r.URL.Host, via), "dim")
 }
 
 // ── System Proxy handler (без auth, отдельный листенер) ──────────────────────
