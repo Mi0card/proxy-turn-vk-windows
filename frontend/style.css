@@ -583,6 +583,80 @@ body.light .help-text { color: #0f172a; }
 body.light .ruleset-item { background: #ffffff; border-color: #e2e8f0; }
 body.light .ruleset-type { color: var(--blue); background: rgba(37,99,235,.1); }
 
+/* ── Routing suggestion dropdown ── */
+
+.rr-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.rr-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 0.25rem;
+}
+
+body.light .rr-suggest {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.rr-suggest-head {
+  padding: 0.5rem 0.75rem;
+  font-weight: bold;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+body.light .rr-suggest-head {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.rr-suggest-item {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+}
+
+.rr-suggest-item:hover,
+.rr-suggest-item.active {
+  background: #f1f5f9;
+}
+
+body.light .rr-suggest-item:hover,
+body.light .rr-suggest-item.active {
+  background: #e2e8f0;
+}
+
+.rr-suggest-item .rr-type {
+  margin-right: 0.5rem;
+  font-weight: bold;
+  color: var(--blue);
+  min-width: 6rem;
+  text-align: right;
+  font-size: 0.8rem;
+}
+
+body.light .rr-suggest-item .rr-type {
+  color: #2563eb;
+}
+
 body.light ::-webkit-scrollbar-track { background: #f1f5f9; }
 body.light ::-webkit-scrollbar-thumb { background: #cbd5e1; }
 

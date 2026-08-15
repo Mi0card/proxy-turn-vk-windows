@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -192,6 +193,27 @@ func (m *RulesetManager) LastUpdate() time.Time {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.lastUpdate
+}
+
+// ListGroups возвращает доступные группы правил для автоподсказок.
+// Возвращает geosite и geoip группы в отображаемом виде.
+func (m *RulesetManager) ListGroups() (geosite, geoip []string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
+	geosite = make([]string, 0, len(m.geosite))
+	for name := range m.geosite {
+		geosite = append(geosite, "geosite-"+strings.ToLower(name))
+	}
+	sort.Strings(geosite)
+	
+	geoip = make([]string, 0, len(m.geoip))
+	for name := range m.geoip {
+		geoip = append(geoip, "geoip-"+strings.ToLower(name))
+	}
+	sort.Strings(geoip)
+	
+	return geosite, geoip
 }
 
 func downloadFile(url, path string) error {
@@ -605,6 +627,14 @@ func parseCIDRMsg(b []byte) (netip.Prefix, bool) {
 func validateRule(rule string) bool {
 	typ, group := parseRule(rule)
 	return (typ == "geosite" || typ == "geoip") && group != ""
+}
+
+// normalizeRule нормализует правило: если нет префикса "ruleset:", добавляет его.
+func normalizeRule(rule string) string {
+	if !strings.HasPrefix(strings.ToLower(rule), "ruleset:") {
+		return "ruleset:" + rule
+	}
+	return rule
 }
 
 // validPolicy возвращает true, если политика поддерживается.

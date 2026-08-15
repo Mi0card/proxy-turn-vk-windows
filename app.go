@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.2"
+const AppVersion = "0.2.5.3"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1204,6 +1204,8 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 		if rc.Rule == "" {
 			continue
 		}
+		// Нормализуем правило: добавляем префикс ruleset: если его нет
+		rc.Rule = normalizeRule(rc.Rule)
 		if !validateRule(rc.Rule) {
 			return "Некорректное правило: " + rc.Rule + " (ожидается ruleset:geosite-... или ruleset:geoip-...)"
 		}
@@ -1223,6 +1225,12 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 	return ""
 }
 
+// RulesetGroups возвращает список доступных групп правил для автоподсказок.
+type RulesetGroups struct {
+	Geosite []string `json:"geosite"`
+	Geoip   []string `json:"geoip"`
+}
+
 // GetRulesetStatus возвращает статус загруженных правил.
 func (a *App) GetRulesetStatus() RulesetStatus {
 	if a.ruleset == nil {
@@ -1232,6 +1240,19 @@ func (a *App) GetRulesetStatus() RulesetStatus {
 	return RulesetStatus{
 		Loaded:     a.ruleset.Loaded(),
 		LastUpdate: last.UnixMilli(),
+	}
+}
+
+// GetRulesetGroups возвращает список доступных групп правил (геосайтов и геоIP).
+// Возвращает пустые списки если правила ещё не загружены.
+func (a *App) GetRulesetGroups() RulesetGroups {
+	if a.ruleset == nil {
+		return RulesetGroups{}
+	}
+	geosite, geoip := a.ruleset.ListGroups()
+	return RulesetGroups{
+		Geosite: geosite,
+		Geoip:   geoip,
 	}
 }
 

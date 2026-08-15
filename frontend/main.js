@@ -9,6 +9,7 @@ const state = {
   logEntries:     [],   // [{ts, msg, lv}] — туннель
   socksEntries:   [],   // [{ts, msg, lv}] — SOCKS5
   routingEntries: [],   // [{ts, msg, lv}] — маршрутизация
+  rulesetGroups:  { geosite: [], geoip: [] }, // [{ts, msg, lv}] — маршрутизация
   logFilter:      'all',
   activeLogTab:   'tunnel',
   lastPingMs:      null,
@@ -78,6 +79,7 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('socks:stats', onSocksStats);
   window.runtime.EventsOn('socks:log', onSocksLog);
   window.runtime.EventsOn('routing:log', onRoutingLog);
+  window.runtime.EventsOn('routing:log', onRoutingLog);
   window.runtime.EventsOn('tunnel:stats', onTunnelStats);
   window.runtime.EventsOn('tunnel:ping',  onTunnelPing);
   window.runtime.EventsOn('deploy:log', onDeployLog);
@@ -106,6 +108,32 @@ window.addEventListener('load', async () => {
   document.getElementById('help-text').textContent = helpText(ver);
 
   log('WinDTT v' + ver + ' запущен', 'success');
+  
+  // Добавляем события для поля ввода правил
+  const input = document.getElementById('rr-new');
+  if (input) {
+    input.addEventListener('input', onRuleInput);
+    input.addEventListener('focus', openRuleSuggest);
+    input.addEventListener('keydown', handleRuleSuggestKeydown);
+    
+    // Закрываем дропдаун при потере фокуса
+    input.addEventListener('blur', function() {
+      // Небольшая задержка чтобы позволить клику на элемент дропдауна сработать
+      setTimeout(closeRuleSuggest, 150);
+    });
+    
+    // Закрываем дропдаун при клике вне его
+    document.addEventListener('mousedown', function(e) {
+      const suggestBox = document.getElementById('rr-suggest');
+      const input = document.getElementById('rr-new');
+      
+      if (suggestBox && input && 
+          !suggestBox.contains(e.target) && 
+          !input.contains(e.target)) {
+        closeRuleSuggest();
+      }
+    });
+  }
 });
 
 // ── Вкладки ──────────────────────────────────────────────────────────────────────
@@ -571,6 +599,31 @@ function onRoutingLog(entry) {
   routingLog(entry.msg, entry.lv);
 }
 
+// ── Лог маршрутизации (ruleset) ───────────────────────────────────────────
+
+// Отдельный лог для маршрутизации (правила, скачивание/обновление дата-файлов).
+function routingLog(msg, lv = 'info') {
+  const ts = new Date().toLocaleTimeString('ru', {hour12: false});
+  const entry = {ts, msg, lv};
+  state.routingEntries.push(entry);
+  appendRoutingLine(entry);
+}
+
+function appendRoutingLine({ts, msg, lv}) {
+  const box = document.getElementById('routing-log-box');
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
+  box.appendChild(line);
+  if (state.activeTab === 'logs' && state.activeLogTab === 'routing') {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+// Получаем отдельные события лога маршрутизации
+function onRoutingLog(entry) {
+  routingLog(entry.msg, entry.lv);
+}
+
 function toggleAuth() {
   const show = document.getElementById('px-use-auth').checked;
   document.getElementById('auth-fields').style.display = show ? '' : 'none';
@@ -663,13 +716,16 @@ function renderRoutingList() {
 }
 
 async function loadRoutingTab() {
-  const [rulesets, status] = await Promise.all([
+  const [rulesets, status, groups] = await Promise.all([
     window.go.main.App.GetRulesets(),
     window.go.main.App.GetRulesetStatus(),
+    window.go.main.App.GetRulesetGroups(),
   ]);
   routingDraft = (rulesets || []).map(r => ({ rule: r.rule, policy: r.policy || 'proxy', enable: r.enable }));
   renderRoutingList();
   updateRoutingStatus(status);
+  state.rulesetGroups = groups;
+  populateRuleOptions(groups);
 }
 
 function updateRoutingStatus(status) {
@@ -690,11 +746,16 @@ function updateRoutingStatus(status) {
 
 function addRoutingRule() {
   const inp = document.getElementById('rr-new');
-  const rule = (inp.value || '').trim();
+  let rule = (inp.value || '').trim();
   if (!rule) { showToast('Введите правило!'); return; }
+  // Нормализуем правило: если нет префикса "ruleset:", добавляем его
+  if (!rule.startsWith('ruleset:')) {
+    rule = 'ruleset:' + rule;
+  }
   routingDraft.push({ rule, policy: 'proxy', enable: true });
   inp.value = '';
   renderRoutingList();
+  closeRuleSuggest();
 }
 
 async function saveRoutingRules() {
@@ -706,6 +767,211 @@ async function saveRoutingRules() {
   routingLog('Маршрутизация: правила маршрутизации сохранены.', 'success');
   const status = await window.go.main.App.GetRulesetStatus();
   updateRoutingStatus(status);
+  
+  // После сохранения обновляем список групп
+  const groups = await window.go.main.App.GetRulesetGroups();
+  state.rulesetGroups = groups;
+  populateRuleOptions(groups);
+  renderRuleSuggest();
+}
+
+// ── Помощь по автоподсказкам ──────────────────────────────────────────────
+
+// Заполняет список подсказок для автоподсказок в поле ввода правил
+function populateRuleOptions(groups) {
+  const datalist = document.getElementById('ruleset-options');
+  if (!datalist) return;
+  
+  // Очищаем существующие опции
+  datalist.innerHTML = '';
+  
+  // Добавляем опции для geosite групп
+  groups.geosite.forEach(group => {
+    const option = document.createElement('option');
+    option.value = group;
+    datalist.appendChild(option);
+  });
+  
+  // Добавляем опции для geoip групп
+  groups.geoip.forEach(group => {
+    const option = document.createElement('option');
+    option.value = group;
+    datalist.appendChild(option);
+  });
+}
+
+// ── Дропдаун подсказок ──────────────────────────────────────────────────
+
+let ruleSuggestState = {
+  open: false,
+  selectedIndex: -1,
+  filteredGroups: { geosite: [], geoip: [] }
+};
+
+function openRuleSuggest() {
+  const input = document.getElementById('rr-new');
+  if (!input) return;
+  
+  ruleSuggestState.open = true;
+  const suggestBox = document.getElementById('rr-suggest');
+  if (suggestBox) {
+    suggestBox.style.display = 'block';
+    renderRuleSuggest();
+  }
+}
+
+function closeRuleSuggest() {
+  ruleSuggestState.open = false;
+  const suggestBox = document.getElementById('rr-suggest');
+  if (suggestBox) {
+    suggestBox.style.display = 'none';
+  }
+  ruleSuggestState.selectedIndex = -1;
+}
+
+function renderRuleSuggest() {
+  const suggestBox = document.getElementById('rr-suggest');
+  if (!suggestBox) return;
+  
+  const input = document.getElementById('rr-new');
+  if (!input) return;
+  
+  const inputValue = (input.value || '').trim();
+  
+  // Фильтруем группы по введенному тексту
+  let filteredGeosite = [];
+  let filteredGeoip = [];
+  
+  if (inputValue) {
+    const searchLower = inputValue.toLowerCase();
+    filteredGeosite = state.rulesetGroups.geosite.filter(group => 
+      group.toLowerCase().includes(searchLower)
+    );
+    filteredGeoip = state.rulesetGroups.geoip.filter(group => 
+      group.toLowerCase().includes(searchLower)
+    );
+  } else {
+    // Если ничего не введено, показываем все
+    filteredGeosite = state.rulesetGroups.geosite;
+    filteredGeoip = state.rulesetGroups.geoip;
+  }
+  
+  ruleSuggestState.filteredGroups = {
+    geosite: filteredGeosite,
+    geoip: filteredGeoip
+  };
+  
+  // Генерируем HTML для подсказок
+  let html = '';
+  
+  if (filteredGeosite.length > 0) {
+    html += `<div class="rr-suggest-head">geosite</div>`;
+    filteredGeosite.forEach((group, index) => {
+      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geosite" data-value="${group}">
+        <span class="rr-type">geosite-</span>
+        ${group.substring(7)}
+      </div>`;
+    });
+  }
+  
+  if (filteredGeoip.length > 0) {
+    html += `<div class="rr-suggest-head">geoip</div>`;
+    filteredGeoip.forEach((group, index) => {
+      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geoip" data-value="${group}">
+        <span class="rr-type">geoip-</span>
+        ${group.substring(5)}
+      </div>`;
+    });
+  }
+  
+  if (filteredGeosite.length === 0 && filteredGeoip.length === 0) {
+    // Если групп нет (например, правила ещё не загружены), показываем сообщение
+    if (state.rulesetGroups.geosite.length === 0 && state.rulesetGroups.geoip.length === 0) {
+      html = `<div class="rr-suggest-item" style="cursor: default; background: #f8fafc; color: #64748b;">
+        Сначала скачайте правила — «Обновить правила»
+      </div>`;
+    } else {
+      html = `<div class="rr-suggest-item" style="cursor: default; background: #f8fafc; color: #64748b;">
+        Нет подходящих групп
+      </div>`;
+    }
+  }
+  
+  suggestBox.innerHTML = html;
+  
+  // Добавляем обработчики событий для элементов подсказок
+  const items = suggestBox.querySelectorAll('.rr-suggest-item');
+  items.forEach((item, index) => {
+    item.addEventListener('click', function() {
+      const value = this.getAttribute('data-value');
+      const input = document.getElementById('rr-new');
+      if (input) {
+        input.value = value;
+        input.focus();
+        closeRuleSuggest();
+      }
+    });
+  });
+}
+
+function handleRuleSuggestKeydown(e) {
+  if (!ruleSuggestState.open) return;
+  
+  const items = document.querySelectorAll('#rr-suggest .rr-suggest-item');
+  if (items.length === 0) return;
+  
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault();
+      ruleSuggestState.selectedIndex = Math.min(ruleSuggestState.selectedIndex + 1, items.length - 1);
+      updateRuleSuggestSelection();
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      ruleSuggestState.selectedIndex = Math.max(ruleSuggestState.selectedIndex - 1, 0);
+      updateRuleSuggestSelection();
+      break;
+    case 'Enter':
+      e.preventDefault();
+      if (ruleSuggestState.selectedIndex >= 0 && items[ruleSuggestState.selectedIndex]) {
+        items[ruleSuggestState.selectedIndex].click();
+      }
+      break;
+    case 'Escape':
+      closeRuleSuggest();
+      break;
+  }
+}
+
+function updateRuleSuggestSelection() {
+  const items = document.querySelectorAll('#rr-suggest .rr-suggest-item');
+  items.forEach((item, index) => {
+    if (index === ruleSuggestState.selectedIndex) {
+      item.classList.add('active');
+    } else {
+      item.classList.remove('active');
+    }
+  });
+}
+
+// ── Работа с полем ввода правил ──────────────────────────────────────────
+
+function onRuleInput() {
+  const input = document.getElementById('rr-new');
+  if (!input) return;
+  
+  const value = input.value.trim();
+  
+  if (value) {
+    // Открываем дропдаун при вводе
+    if (!ruleSuggestState.open) {
+      openRuleSuggest();
+    }
+    renderRuleSuggest();
+  } else {
+    // Закрываем дропдаун при очистке
+    closeRuleSuggest();
+  }
 }
 
 async function updateAllRulesets() {
@@ -716,6 +982,12 @@ async function updateAllRulesets() {
     if (err) { showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); }
     const status = await window.go.main.App.GetRulesetStatus();
     updateRoutingStatus(status);
+    
+    // После обновления правил обновляем список групп
+    const groups = await window.go.main.App.GetRulesetGroups();
+    state.rulesetGroups = groups;
+    populateRuleOptions(groups);
+    renderRuleSuggest();
   } catch (e) {
     routingLog('Маршрутизация: ' + e, 'error');
     showToast('Маршрутизация: ' + e);
@@ -1120,6 +1392,7 @@ PROXY (SOCKS5 + HTTP)
     ruleset:geosite-category-ru → proxy
     ruleset:geosite-youtube     → block
     ruleset:geoip-private       → direct
+  Правила можно вводить без префикса "ruleset:". Он добавляется автоматически.
   Политики: block (заблокировать),
     direct (напрямую в обход туннеля),
     proxy (через туннель).
