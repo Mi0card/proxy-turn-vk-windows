@@ -187,7 +187,12 @@
   <section id="tab-routing" class="tab-panel hidden">
     <div class="routing-head">
       <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
-      <button id="btn-rules-update" class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+      <div class="row-flex">
+        <label class="rules-via-tunnel" title="GitHub может быть недоступен без туннеля — скачивать geosite/geoip через активный туннель">
+          <input type="checkbox" id="rr-via-tunnel"> через туннель
+        </label>
+        <button id="btn-rules-update" class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+      </div>
     </div>
 
     <div id="rules-progress" class="rules-progress" style="display:none">
