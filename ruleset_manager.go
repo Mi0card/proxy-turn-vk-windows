@@ -61,6 +61,7 @@ type RulesetManager struct {
 	loaded     bool
 	lastUpdate time.Time
 	logFn      func(msg, lv string)
+	progressFn func(stage string, pct int)
 }
 
 func NewRulesetManager(baseDir string) *RulesetManager {
@@ -76,6 +77,21 @@ func (m *RulesetManager) SetLogFn(fn func(msg, lv string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logFn = fn
+}
+
+// SetProgressFn задаёт функцию прогресса скачивания (stage: "geosite"/"geoip",
+// pct: 0-100 или -1 если точный прогресс неизвестен).
+func (m *RulesetManager) SetProgressFn(fn func(stage string, pct int)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.progressFn = fn
+}
+
+// progress отправляет прогресс через progressFn, если он задан.
+func (m *RulesetManager) progress(stage string, pct int) {
+	if m.progressFn != nil {
+		m.progressFn(stage, pct)
+	}
 }
 
 // log отправляет сообщение через logFn, если он задан. Вызывается только при
@@ -105,18 +121,24 @@ func (m *RulesetManager) UpdateRulesets() error {
 	geoipPath := filepath.Join(m.cacheDir, "geoip.dat")
 
 	m.log("Маршрутизация: скачиваю geosite.dat (" + defaultGeositeURL + ") ...", "info")
-	if err := downloadFile(defaultGeositeURL, geositePath); err != nil {
+	if err := downloadFile(defaultGeositeURL, geositePath, func(done, total int64) {
+		m.progress("geosite", pctOf(done, total))
+	}); err != nil {
 		m.log("Маршрутизация: не удалось скачать geosite.dat: "+err.Error(), "error")
 		return fmt.Errorf("geosite.dat: %w", err)
 	}
 	m.log("Маршрутизация: geosite.dat сохранён в "+geositePath, "info")
+	m.progress("geosite", 100)
 
 	m.log("Маршрутизация: скачиваю geoip.dat (" + defaultGeoIPURL + ") ...", "info")
-	if err := downloadFile(defaultGeoIPURL, geoipPath); err != nil {
+	if err := downloadFile(defaultGeoIPURL, geoipPath, func(done, total int64) {
+		m.progress("geoip", pctOf(done, total))
+	}); err != nil {
 		m.log("Маршрутизация: не удалось скачать geoip.dat: "+err.Error(), "error")
 		return fmt.Errorf("geoip.dat: %w", err)
 	}
 	m.log("Маршрутизация: geoip.dat сохранён в "+geoipPath, "info")
+	m.progress("geoip", 100)
 
 	gs, err := parseGeositeFile(geositePath)
 	if err != nil {
@@ -216,7 +238,19 @@ func (m *RulesetManager) ListGroups() (geosite, geoip []string) {
 	return geosite, geoip
 }
 
-func downloadFile(url, path string) error {
+// pctOf переводит (done, total) в проценты. Если total неизвестен (<=0) —
+// возвращает -1 (неопределённый прогресс).
+func pctOf(done, total int64) int {
+	if total <= 0 {
+		return -1
+	}
+	if done >= total {
+		return 100
+	}
+	return int(done * 100 / total)
+}
+
+func downloadFile(url, path string, onProgress func(done, total int64)) error {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -233,7 +267,12 @@ func downloadFile(url, path string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	body := io.Reader(resp.Body)
+	if onProgress != nil {
+		total := resp.ContentLength
+		body = &progressReader{r: resp.Body, total: total, onProgress: onProgress}
+	}
+	if _, err := io.Copy(f, body); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return err
@@ -243,6 +282,23 @@ func downloadFile(url, path string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// progressReader считает прочитанные байты и вызывает onProgress.
+type progressReader struct {
+	r          io.Reader
+	total      int64
+	done       int64
+	onProgress func(done, total int64)
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.done += int64(n)
+		p.onProgress(p.done, p.total)
+	}
+	return n, err
 }
 
 // ── Данные групп ────────────────────────────────────────────────────────

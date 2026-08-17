@@ -85,11 +85,18 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('deploy:log', onDeployLog);
   window.runtime.EventsOn('tunnel:wgconfig', onWgConfig);
   window.runtime.EventsOn('sysproxy:status', onSysProxyStatus);
+  window.runtime.EventsOn('ruleset:progress', onRulesetProgress);
 
 
   // Загружаем конфиг и заполняем поля
   const cfg = await window.go.main.App.GetConfig();
   loadConfig(cfg);
+
+  // Восстанавливаем состояние кнопок прокси (если прокси уже запущен).
+  try {
+    const socksOn = await window.go.main.App.SocksStatus();
+    if (socksOn) onSocksStatus(true);
+  } catch (e) { /* SocksStatus недоступен — оставляем дефолт */ }
 
   // Статус бинарника
   const exeExists = await window.go.main.App.GetClientExeExists();
@@ -445,6 +452,10 @@ async function proxyStart() {
     btn.disabled = false;
   } finally {
     setBusy(btn, false);
+    // Состояние кнопок по факту запуска прокси (setBusy(false) их перевключает).
+    const running = state.socksRunning;
+    document.getElementById('btn-pstart').disabled = running;
+    document.getElementById('btn-pstop').disabled  = !running;
   }
 }
 
@@ -532,15 +543,21 @@ function onSocksStatus(running) {
   state.socksRunning = running;
   const el = document.getElementById('proxy-status-label');
   const sb = document.getElementById('socks-badge');
+  const btnStart = document.getElementById('btn-pstart');
+  const btnStop  = document.getElementById('btn-pstop');
   if (running) {
     el.textContent = '● Локальный прокси включен';
     el.className = 'proxy-status connected';
     sb.innerHTML = '<span class="dot"></span> Локальный прокси';
     sb.className = 'badge connected';
+    if (btnStart) btnStart.disabled = true;
+    if (btnStop)  btnStop.disabled  = false;
   } else {
     el.textContent = '● Локальный прокси выключен';
     el.className = 'proxy-status disconnected';
     sb.className = 'badge hidden';
+    if (btnStart) btnStart.disabled = false;
+    if (btnStop)  btnStop.disabled  = true;
   }
 }
 
@@ -949,9 +966,41 @@ function onRuleInput() {
   }
 }
 
+// Флаг активного обновления правил — прогресс-бар показываем только когда
+// обновление запущено пользователем (а не фоновой загрузкой при старте).
+let rulesUpdating = false;
+
+function onRulesetProgress(data) {
+  if (!rulesUpdating) return;
+  const bar = document.getElementById('rules-progress-bar');
+  const label = document.getElementById('rules-progress-label');
+  if (!bar || !label) return;
+  const pct   = data && typeof data.pct === 'number' ? data.pct : -1;
+  const stage = (data && data.stage) || '';
+  const stageName = stage === 'geoip'   ? 'geoip.dat'
+    : stage === 'geosite' ? 'geosite.dat'
+    : 'правил';
+  if (pct >= 0) {
+    bar.classList.remove('indeterminate');
+    bar.style.width = pct + '%';
+    label.textContent = `Загрузка ${stageName}… ${pct}%`;
+  } else {
+    bar.classList.add('indeterminate');
+    bar.style.width = '';
+    label.textContent = `Загрузка ${stageName}…`;
+  }
+}
+
 async function updateAllRulesets() {
   const btn = document.getElementById('btn-rules-update');
   setBusy(btn, true, '…  Обновление');
+  const bar = document.getElementById('rules-progress');
+  const barEl = document.getElementById('rules-progress-bar');
+  if (barEl) { barEl.style.width = ''; barEl.classList.add('indeterminate'); }
+  const label = document.getElementById('rules-progress-label');
+  if (label) label.textContent = 'Загрузка правил…';
+  if (bar) bar.style.display = '';
+  rulesUpdating = true;
   try {
     const err = await window.go.main.App.UpdateRulesets();
     if (err) { showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); }
@@ -967,7 +1016,9 @@ async function updateAllRulesets() {
     routingLog('Маршрутизация: ' + e, 'error');
     showToast('Маршрутизация: ' + e);
   } finally {
+    rulesUpdating = false;
     setBusy(btn, false);
+    if (bar) bar.style.display = 'none';
   }
 }
 

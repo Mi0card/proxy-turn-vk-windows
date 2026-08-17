@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.5"
+const AppVersion = "0.2.5.6"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -201,6 +201,7 @@ func (a *App) startup(ctx context.Context) {
 	// Настраиваем маршрутизацию: менеджер правил и текущий список правил прокси.
 	a.ruleset = NewRulesetManager(a.baseDir)
 	a.ruleset.SetLogFn(a.routingLog)
+	a.ruleset.SetProgressFn(a.onRulesetProgress)
 	if a.proxy != nil {
 		a.proxy.SetRulesetManager(a.ruleset)
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
@@ -469,6 +470,15 @@ func (a *App) deployLog(msg, lv string) {
 func (a *App) routingLog(msg, lv string) {
 	ts := time.Now().Format("15:04:05")
 	runtime.EventsEmit(a.ctx, "routing:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+}
+
+// onRulesetProgress транслирует прогресс скачивания правил в UI.
+// pct == -1 означает неопределённый прогресс (объём неизвестен).
+func (a *App) onRulesetProgress(stage string, pct int) {
+	runtime.EventsEmit(a.ctx, "ruleset:progress", map[string]interface{}{
+		"stage": stage,
+		"pct":   pct,
+	})
 }
 
 // ── Tunnel API ────────────────────────────────────────────────────────────────
