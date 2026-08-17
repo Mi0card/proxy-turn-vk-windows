@@ -269,7 +269,7 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .rules-via-tunnel {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
@@ -278,6 +278,8 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .rules-via-tunnel input[type="checkbox"] {
+  margin: 0;
+  vertical-align: middle;
   accent-color: var(--blue);
   cursor: pointer;
 }
