@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.6"
+const AppVersion = "0.2.5.7"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,7 @@ type Config struct {
 	PxPass      string          `json:"px_pass"`
 	Theme       string          `json:"theme"`
 	Rulesets    []RulesetConfig `json:"rulesets"`
+	RulesViaTunnel bool         `json:"rules_via_tunnel"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -202,6 +203,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ruleset = NewRulesetManager(a.baseDir)
 	a.ruleset.SetLogFn(a.routingLog)
 	a.ruleset.SetProgressFn(a.onRulesetProgress)
+	a.ruleset.SetViaTunnel(a.getCfg().RulesViaTunnel)
 	if a.proxy != nil {
 		a.proxy.SetRulesetManager(a.ruleset)
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
@@ -1271,6 +1273,12 @@ func (a *App) GetRulesetGroups() RulesetGroups {
 func (a *App) UpdateRulesets() string {
 	if a.ruleset == nil {
 		return "роутинг не инициализирован"
+	}
+	cfg := a.getCfg()
+	// Опция «через туннель» — применяем текущее значение и проверяем туннель.
+	a.ruleset.SetViaTunnel(cfg.RulesViaTunnel)
+	if cfg.RulesViaTunnel && !WGTunnelActive() {
+		return "Опция «через туннель» включена, но туннель не активен. Подключите туннель или отключите опцию."
 	}
 	if err := a.ruleset.UpdateRulesets(); err != nil {
 		a.routingLog("Маршрутизация: ошибка обновления правил: "+err.Error(), "error")

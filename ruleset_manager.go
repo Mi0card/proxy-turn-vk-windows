@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -62,6 +64,7 @@ type RulesetManager struct {
 	lastUpdate time.Time
 	logFn      func(msg, lv string)
 	progressFn func(stage string, pct int)
+	viaTunnel  bool // скачивать через активный туннель (wgDialStrict)
 }
 
 func NewRulesetManager(baseDir string) *RulesetManager {
@@ -85,6 +88,34 @@ func (m *RulesetManager) SetProgressFn(fn func(stage string, pct int)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.progressFn = fn
+}
+
+// SetViaTunnel включает/выключает скачивание правил через активный туннель.
+func (m *RulesetManager) SetViaTunnel(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.viaTunnel = v
+}
+
+// newClient создаёт http.Client для скачивания. При viaTunnel соединения
+// идут строго через туннель (без fallback на прямое соединение).
+// Вызывается только при удержании m.mu (см. UpdateRulesets).
+func (m *RulesetManager) newClient() *http.Client {
+	return newRulesetClient(m.viaTunnel)
+}
+
+func newRulesetClient(viaTunnel bool) *http.Client {
+	if viaTunnel {
+		return &http.Client{
+			Timeout: 5 * time.Minute,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return wgDialStrict(network, addr)
+				},
+			},
+		}
+	}
+	return &http.Client{Timeout: 5 * time.Minute}
 }
 
 // progress отправляет прогресс через progressFn, если он задан.
@@ -121,7 +152,7 @@ func (m *RulesetManager) UpdateRulesets() error {
 	geoipPath := filepath.Join(m.cacheDir, "geoip.dat")
 
 	m.log("Маршрутизация: скачиваю geosite.dat (" + defaultGeositeURL + ") ...", "info")
-	if err := downloadFile(defaultGeositeURL, geositePath, func(done, total int64) {
+	if err := downloadFile(m.newClient(), defaultGeositeURL, geositePath, func(done, total int64) {
 		m.progress("geosite", pctOf(done, total))
 	}); err != nil {
 		m.log("Маршрутизация: не удалось скачать geosite.dat: "+err.Error(), "error")
@@ -131,7 +162,7 @@ func (m *RulesetManager) UpdateRulesets() error {
 	m.progress("geosite", 100)
 
 	m.log("Маршрутизация: скачиваю geoip.dat (" + defaultGeoIPURL + ") ...", "info")
-	if err := downloadFile(defaultGeoIPURL, geoipPath, func(done, total int64) {
+	if err := downloadFile(m.newClient(), defaultGeoIPURL, geoipPath, func(done, total int64) {
 		m.progress("geoip", pctOf(done, total))
 	}); err != nil {
 		m.log("Маршрутизация: не удалось скачать geoip.dat: "+err.Error(), "error")
@@ -250,8 +281,7 @@ func pctOf(done, total int64) int {
 	return int(done * 100 / total)
 }
 
-func downloadFile(url, path string, onProgress func(done, total int64)) error {
-	client := &http.Client{Timeout: 5 * time.Minute}
+func downloadFile(client *http.Client, url, path string, onProgress func(done, total int64)) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return err

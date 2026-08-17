@@ -141,6 +141,10 @@ window.addEventListener('load', async () => {
       }
     });
   }
+
+  // «Скачивать правила через туннель» — сохраняем сразу при изменении.
+  const rvt = document.getElementById('rr-via-tunnel');
+  if (rvt) rvt.addEventListener('change', saveConfig);
 });
 
 // ── Вкладки ──────────────────────────────────────────────────────────────────────
@@ -196,6 +200,9 @@ function loadConfig(cfg) {
     for (let o of om.options) if (o.value === cfg.obfs_mode) o.selected = true;
   }
 
+  const rvt = document.getElementById('rr-via-tunnel');
+  if (rvt && cfg.rules_via_tunnel !== undefined) rvt.checked = !!cfg.rules_via_tunnel;
+
   // px_use_auth: undefined → оставляем HTML-дефолт (checked)
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
@@ -220,6 +227,7 @@ function collectConfig() {
     px_use_auth:  document.getElementById('px-use-auth').checked,
     px_user:      getVal('px-user'),
     px_pass:      getVal('px-pass'),
+    rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }
@@ -288,6 +296,8 @@ async function connect() {
     btn.disabled = false;
   } finally {
     setBusy(btn, false);
+    // Состояние кнопки по факту запуска туннеля (setBusy(false) её переключает).
+    updateTunnelUI();
   }
 }
 
@@ -322,6 +332,8 @@ async function stop() {
     showToast('Не удалось остановить туннель: ' + e);
   } finally {
     setBusy(btn, false);
+    // Состояние кнопки по факту остановки туннеля (setBusy(false) её переключает).
+    updateTunnelUI();
   }
 }
 
