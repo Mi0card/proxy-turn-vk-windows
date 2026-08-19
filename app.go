@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.7"
+const AppVersion = "0.2.5.8"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -340,6 +340,14 @@ func (a *App) GetConfig() Config {
 
 func (a *App) SaveConfig(cfg Config) {
 	a.cfgMu.Lock()
+	// Фронтенд не отправляет rulesets/device_id через SaveConfig —
+	// сохраняем текущие значения, иначе они сбросятся на каждом сохранении.
+	if cfg.Rulesets == nil {
+		cfg.Rulesets = a.cfg.Rulesets
+	}
+	if cfg.DeviceID == "" {
+		cfg.DeviceID = a.cfg.DeviceID
+	}
 	a.cfg = cfg
 	a.cfgMu.Unlock()
 	a.persistConfig()

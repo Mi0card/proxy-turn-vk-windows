@@ -304,6 +304,19 @@ body { display: flex; flex-direction: column; }
   font-size: 12px;
   padding: 4px 8px;
 }
+.rules-saved {
+  font-size: 12px;
+  color: var(--success);
+  animation: saved-fade .3s ease-in;
+}
+@keyframes saved-fade {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.btn.saved {
+  background: var(--success) !important;
+  color: #fff;
+}
 
 /* ── Buttons ── */
 .btn {

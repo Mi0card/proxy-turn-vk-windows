@@ -764,19 +764,35 @@ function addRoutingRule() {
 
 async function saveRoutingRules() {
   const configs = routingDraft.map(r => ({ rule: r.rule, policy: r.policy, enable: r.enable }));
+  const btn = document.getElementById('btn-rules-save');
+  const saved = document.getElementById('rules-saved');
+  if (btn) { btn.disabled = true; btn.textContent = '💾 Сохраняю…'; }
+  if (saved) saved.style.display = 'none';
   const err = await window.go.main.App.SetRulesets(configs);
-  if (err) { showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); return; }
+  if (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Сохранить'; }
+    showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); return;
+  }
   // Убеждаемся, что правила загружены и применены к прокси.
   await window.go.main.App.EnsureRulesetsLoaded();
   routingLog('Маршрутизация: правила маршрутизации сохранены.', 'success');
+  showToast('Правила маршрутизации сохранены.', 'success');
   const status = await window.go.main.App.GetRulesetStatus();
   updateRoutingStatus(status);
-  
+
   // После сохранения обновляем список групп
   const groups = await window.go.main.App.GetRulesetGroups();
   state.rulesetGroups = groups;
   populateRuleOptions(groups);
   renderRuleSuggest();
+
+  // Визуальный индикатор: кнопка «Сохранить» и надпись «Сохранено»
+  if (btn) { btn.textContent = '✓ Сохранено'; btn.classList.add('saved'); }
+  if (saved) saved.style.display = 'inline';
+  setTimeout(() => {
+    if (btn) { btn.textContent = '💾 Сохранить'; btn.classList.remove('saved'); btn.disabled = false; }
+    if (saved) saved.style.display = 'none';
+  }, 1500);
 }
 
 // ── Помощь по автоподсказкам ──────────────────────────────────────────────
