@@ -203,14 +203,18 @@
     <div class="card">
       <div class="card-title">Правила маршрутизации</div>
       <p class="hint hint--spaced">
-        Формат: <code>geosite-category-ru</code>, <code>geosite-youtube</code>, <code>geoip-private</code>.
+        Формат: <code>geosite-category-ru</code>, <code>geoip-private</code>,
+        а также встроенные правила <code>domain:example.com</code> (точно),
+        <code>domain-suffix:example.com</code> (домен + поддомены),
+        <code>keyword:text</code>, <code>regex:\.example\.com$</code>,
+        <code>cidr:10.0.0.0/8</code>, <code>ip:1.2.3.4</code> — они работают без скачивания правил.
         Правила применяются сверху вниз — первое совпадение выигрывает.
         Политики: <b>block</b> (заблокировать), <b>direct</b> (напрямую, в обход туннеля),
         <b>proxy</b> (через туннель).
         <br>Подсказки: начните вводить, чтобы увидеть доступные правила.
       </p>
       <div class="row-flex rr-input-wrap">
-        <input id="rr-new" type="text" class="inp mono" placeholder="geosite-category-ru">
+        <input id="rr-new" type="text" class="inp mono" placeholder="geosite-category-ru / domain:example.com / keyword:youtube">
         <datalist id="ruleset-options"></datalist>
         <button class="btn btn-primary btn-sm" onclick="addRoutingRule()">+ Добавить</button>
         <div id="rr-suggest" class="rr-suggest" style="display:none"></div>

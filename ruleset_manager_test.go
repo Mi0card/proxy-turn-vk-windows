@@ -263,6 +263,14 @@ func TestParseRule(t *testing.T) {
 		{"ruleset:geosite-youtube", "geosite", "youtube"},
 		{"ruleset:plain", "plain", ""},
 		{"not-a-rule", "", ""},
+		{"domain:example.com", "domain", "example.com"},
+		{"domain-suffix:example.com", "domain-suffix", "example.com"},
+		{"keyword:youtube", "keyword", "youtube"},
+		{"regex:\\.example\\.com$", "regex", `\.example\.com$`},
+		{"cidr:10.0.0.0/8", "cidr", "10.0.0.0/8"},
+		{"ip:1.2.3.4", "ip", "1.2.3.4"},
+		{"DOMAIN:Example.COM", "domain", "Example.COM"},
+		{"  domain-suffix:vk.com  ", "domain-suffix", "vk.com"},
 	}
 	for _, c := range cases {
 		typ, group := parseRule(c.in)
@@ -285,9 +293,60 @@ func TestValidateRule(t *testing.T) {
 		{"geosite-category-ru", false},
 		{"", false},
 		{"ruleset:", false},
+		{"domain:example.com", true},
+		{"domain:", false},
+		{"domain-suffix:example.com", true},
+		{"domain-suffix:", false},
+		{"keyword:youtube", true},
+		{"keyword:", false},
+		{"regex:\\.example\\.com$", true},
+		{"regex:[", false},
+		{"cidr:10.0.0.0/8", true},
+		{"cidr:not-a-subnet", false},
+		{"ip:1.2.3.4", true},
+		{"ip:not-an-ip", false},
 	} {
 		if got := validateRule(ok.rule); got != ok.want {
 			t.Errorf("validateRule(%q) = %v, ожидалось %v", ok.rule, got, ok.want)
+		}
+	}
+}
+
+func TestNormalizeRule(t *testing.T) {
+	cases := map[string]string{
+		"geosite-category-ru":    "ruleset:geosite-category-ru",
+		"geoip-private":          "ruleset:geoip-private",
+		"ruleset:geoip-private":  "ruleset:geoip-private",
+		"domain:example.com":     "domain:example.com",
+		"DOMAIN-SUFFIX:vk.com":   "DOMAIN-SUFFIX:vk.com",
+		"keyword:youtube":         "keyword:youtube",
+		"regex:\\.com$":          `regex:\.com$`,
+		"cidr:10.0.0.0/8":        "cidr:10.0.0.0/8",
+		"ip:1.2.3.4":             "ip:1.2.3.4",
+		"  keyword:youtube  ":     "keyword:youtube",
+	}
+	for in, want := range cases {
+		if got := normalizeRule(in); got != want {
+			t.Errorf("normalizeRule(%q) = %q, ожидалось %q", in, got, want)
+		}
+	}
+}
+
+func TestNeedsDownloadedRulesets(t *testing.T) {
+	cases := []struct {
+		configs []RulesetConfig
+		want    bool
+	}{
+		{nil, false},
+		{[]RulesetConfig{{Rule: "domain:example.com"}}, false},
+		{[]RulesetConfig{{Rule: "keyword:youtube"}, {Rule: "cidr:10.0.0.0/8"}}, false},
+		{[]RulesetConfig{{Rule: "ruleset:geosite-youtube"}}, true},
+		{[]RulesetConfig{{Rule: "ruleset:geoip-private"}}, true},
+		{[]RulesetConfig{{Rule: "domain:example.com"}, {Rule: "ruleset:geoip-private"}}, true},
+	}
+	for _, c := range cases {
+		if got := needsDownloadedRulesets(c.configs); got != c.want {
+			t.Errorf("needsDownloadedRulesets(%+v) = %v, ожидалось %v", c.configs, got, c.want)
 		}
 	}
 }
@@ -303,6 +362,96 @@ func TestValidPolicy(t *testing.T) {
 		if got := validPolicy(c.p); got != c.want {
 			t.Errorf("validPolicy(%q) = %v, ожидалось %v", c.p, got, c.want)
 		}
+	}
+}
+
+// ── Матчинг встроенных (inline) правил ────────────────────────────────────────
+
+func TestMatchRulesInlineDomain(t *testing.T) {
+	m := NewRulesetManager("") // без geosite/geoip — скачивание не нужно
+	configs := []RulesetConfig{
+		{Rule: "domain:exact.example", Policy: "block", Enable: true},
+		{Rule: "domain-suffix:sobaka.com", Policy: "direct", Enable: true},
+		{Rule: "keyword:youtube", Policy: "proxy", Enable: true},
+	}
+
+	// domain: — только точное совпадение.
+	if !m.MatchRules(configs, "exact.example", func(match RoutingMatch) bool {
+		return match.Policy == "block"
+	}) {
+		t.Error("exact.example должен совпадать с domain:")
+	}
+	if m.MatchRules(configs, "sub.exact.example", func(RoutingMatch) bool { return true }) {
+		t.Error("sub.exact.example не должен совпадать с domain: (точное)")
+	}
+
+	// domain-suffix: — сам домен и поддомены.
+	if !m.MatchRules(configs, "sobaka.com", func(match RoutingMatch) bool {
+		return match.Policy == "direct"
+	}) {
+		t.Error("sobaka.com должен совпадать с domain-suffix:")
+	}
+	if !m.MatchRules(configs, "music.sobaka.com", func(match RoutingMatch) bool {
+		return match.Policy == "direct"
+	}) {
+		t.Error("music.sobaka.com должен совпадать с domain-suffix:")
+	}
+	if m.MatchRules(configs, "notsobaka.com", func(RoutingMatch) bool { return true }) {
+		t.Error("notsobaka.com не должен совпадать")
+	}
+
+	// keyword: — подстрока в домене (без учёта регистра).
+	if !m.MatchRules(configs, "www.youtube.com", func(match RoutingMatch) bool {
+		return match.Policy == "proxy"
+	}) {
+		t.Error("www.youtube.com должен совпадать с keyword:")
+	}
+	if !m.MatchRules(configs, "YouTuBe.com", func(match RoutingMatch) bool {
+		return match.Policy == "proxy"
+	}) {
+		t.Error("YouTuBe.com должен совпадать с keyword: (регистронезависимо)")
+	}
+}
+
+func TestMatchRulesInlineRegex(t *testing.T) {
+	m := NewRulesetManager("")
+	configs := []RulesetConfig{
+		{Rule: `regex:\.yandex\.ru$`, Policy: "block", Enable: true},
+	}
+	if !m.MatchRules(configs, "music.yandex.ru", func(match RoutingMatch) bool {
+		return match.Policy == "block"
+	}) {
+		t.Error("music.yandex.ru должен совпадать с regex:")
+	}
+	if m.MatchRules(configs, "yandex.ru.evil.com", func(RoutingMatch) bool { return true }) {
+		t.Error("yandex.ru.evil.com не должен совпадать")
+	}
+}
+
+func TestMatchRulesInlineCIDRAndIP(t *testing.T) {
+	m := NewRulesetManager("")
+	configs := []RulesetConfig{
+		{Rule: "cidr:10.0.0.0/8", Policy: "direct", Enable: true},
+		{Rule: "ip:8.8.8.8", Policy: "block", Enable: true},
+	}
+
+	if !m.MatchRules(configs, "10.1.2.3", func(match RoutingMatch) bool {
+		return match.Policy == "direct"
+	}) {
+		t.Error("10.1.2.3 должен совпадать с cidr:")
+	}
+	if m.MatchRules(configs, "11.0.0.1", func(RoutingMatch) bool { return true }) {
+		t.Error("11.0.0.1 не должен совпадать")
+	}
+	if !m.MatchRules(configs, "8.8.8.8", func(match RoutingMatch) bool {
+		return match.Policy == "block"
+	}) {
+		t.Error("8.8.8.8 должен совпадать с ip:")
+	}
+	if !m.MatchRules(configs, "::ffff:8.8.8.8", func(match RoutingMatch) bool {
+		return match.Policy == "block"
+	}) {
+		t.Error("::ffff:8.8.8.8 должен совпадать с ip: после unmapping")
 	}
 }
 

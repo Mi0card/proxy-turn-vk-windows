@@ -664,18 +664,28 @@ function routingPolicyLabel(p) {
   }
 }
 
+// Разбирает строку правила на {type, value} для отображения.
+// types: geosite/geoip (из ruleset:...), domain, domain-suffix, keyword, regex, cidr, ip.
+function splitRule(rule) {
+  const s = rule || '';
+  const m = /^(ruleset:|domain-suffix:|domain:|keyword:|regex:|cidr:|ip:)/i.exec(s);
+  if (!m) return {type: s, value: ''};
+  const prefix = m[1].toLowerCase();
+  if (prefix === 'ruleset:') {
+    const rest = s.slice(m[1].length);
+    const idx = rest.indexOf('-');
+    if (idx < 0) return {type: rest, value: ''};
+    return {type: rest.slice(0, idx), value: rest.slice(idx + 1)};
+  }
+  return {type: prefix.slice(0, -1), value: s.slice(m[1].length)};
+}
+
 function routingRuleType(rule) {
-  const r = (rule || '').replace(/^ruleset:/, '');
-  const idx = r.indexOf('-');
-  if (idx < 0) return r;
-  return r.slice(0, idx);
+  return splitRule(rule).type;
 }
 
 function routingRuleGroup(rule) {
-  const r = (rule || '').replace(/^ruleset:/, '');
-  const idx = r.indexOf('-');
-  if (idx < 0) return '';
-  return r.slice(idx + 1);
+  return splitRule(rule).value;
 }
 
 function renderRoutingList() {
@@ -735,9 +745,14 @@ async function loadRoutingTab() {
 function updateRoutingStatus(status) {
   const el = document.getElementById('routing-status');
   if (!el) return;
+  // Встроенные правила (domain:/keyword:/regex:/cidr:/ip:) не требуют скачивания.
+  const needsRulesets = (routingDraft || []).some(r => /^ruleset:/i.test(r.rule));
   if (status && status.loaded) {
     const when = status.last_update ? new Date(status.last_update).toLocaleString('ru') : 'неизвестно';
     el.textContent = '● Правила загружены (обновлены: ' + when + ')';
+    el.className = 'proxy-status connected';
+  } else if (routingDraft.length && !needsRulesets) {
+    el.textContent = '● Маршрутизация активна (встроенные правила, скачивание не требуется)';
     el.className = 'proxy-status connected';
   } else if (routingDraft.length) {
     el.textContent = '● Правила не загружены — нажмите «Обновить правила», чтобы скачать geosite/geoip';
@@ -752,8 +767,8 @@ function addRoutingRule() {
   const inp = document.getElementById('rr-new');
   let rule = (inp.value || '').trim();
   if (!rule) { showToast('Введите правило!'); return; }
-  // Нормализуем правило: если нет префикса "ruleset:", добавляем его
-  if (!rule.startsWith('ruleset:')) {
+  // Нормализуем правило: если нет известного префикса, добавляем "ruleset:"
+  if (!/^(ruleset:|domain-suffix:|domain:|keyword:|regex:|cidr:|ip:)/i.test(rule)) {
     rule = 'ruleset:' + rule;
   }
   routingDraft.push({ rule, policy: 'proxy', enable: true });
@@ -797,6 +812,16 @@ async function saveRoutingRules() {
 
 // ── Помощь по автоподсказкам ──────────────────────────────────────────────
 
+// Примеры встроенных правил (не требуют скачивания дата-файлов).
+const INLINE_RULE_EXAMPLES = [
+  'domain:example.com',
+  'domain-suffix:example.com',
+  'keyword:example',
+  'regex:\\.example\\.com$',
+  'cidr:10.0.0.0/8',
+  'ip:1.2.3.4',
+];
+
 // Заполняет список подсказок для автоподсказок в поле ввода правил
 function populateRuleOptions(groups) {
   const datalist = document.getElementById('ruleset-options');
@@ -816,6 +841,13 @@ function populateRuleOptions(groups) {
   groups.geoip.forEach(group => {
     const option = document.createElement('option');
     option.value = group;
+    datalist.appendChild(option);
+  });
+
+  // Добавляем примеры встроенных правил
+  INLINE_RULE_EXAMPLES.forEach(example => {
+    const option = document.createElement('option');
+    option.value = example;
     datalist.appendChild(option);
   });
 }
@@ -903,12 +935,27 @@ function renderRuleSuggest() {
       </div>`;
     });
   }
+
+  // Встроенные правила — фильтруем примеры по введённому тексту.
+  const filteredInline = INLINE_RULE_EXAMPLES.filter(e => {
+    if (!inputValue) return true;
+    return e.toLowerCase().includes(inputValue.toLowerCase());
+  });
+  if (filteredInline.length > 0) {
+    html += `<div class="rr-suggest-head">встроенные (без скачивания)</div>`;
+    filteredInline.forEach(example => {
+      html += `<div class="rr-suggest-item" data-type="inline" data-value="${escHtml(example)}">
+        <span class="rr-type">${escHtml(example.split(':')[0] + ':')}</span>
+        ${escHtml(example.split(':').slice(1).join(':'))}
+      </div>`;
+    });
+  }
   
-  if (filteredGeosite.length === 0 && filteredGeoip.length === 0) {
-    // Если групп нет (например, правила ещё не загружены), показываем сообщение
+  if (filteredGeosite.length === 0 && filteredGeoip.length === 0 && filteredInline.length === 0) {
+    // Если ничего не найдено, показываем сообщение
     if (state.rulesetGroups.geosite.length === 0 && state.rulesetGroups.geoip.length === 0) {
       html = `<div class="rr-suggest-item rr-suggest-empty">
-        Сначала скачайте правила — «Обновить правила»
+        Правила не загружены — встроенные правила (domain:/keyword:/...) работают без скачивания
       </div>`;
     } else {
       html = `<div class="rr-suggest-item rr-suggest-empty">
@@ -1439,14 +1486,24 @@ PROXY (SOCKS5 + HTTP)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 МАРШРУТИЗАЦИЯ (по правилам)
-  Задаёт, куда направлять трафик по правилам:
+  Задаёт, куда направлять трафик по правилам.
+  Встроенные правила (без скачивания):
+    domain:<домен>        — точное совпадение домена
+    domain-suffix:<домен> — домен и все поддомены
+    keyword:<текст>       — подстрока в домене
+    regex:<шаблон>        — регулярное выражение по домену
+    cidr:<подсеть>        — IP-подсеть (cidr:10.0.0.0/8)
+    ip:<адрес>            — конкретный IP (ip:1.2.3.4)
+  Правила из дата-файлов (нужно «Обновить правила»):
     ruleset:geosite-<группа>  — домены из geosite
     ruleset:geoip-<группа>    — подсети из geoip
   Примеры:
+    domain-suffix:sobaka.com → block
+    keyword:youtube          → proxy
     ruleset:geosite-category-ru → proxy
-    ruleset:geosite-youtube     → block
     ruleset:geoip-private       → direct
-  Правила можно вводить без префикса "ruleset:". Он добавляется автоматически.
+  Правила можно вводить без префикса "ruleset:"
+  (geosite-... / geoip-...) — он добавляется автоматически.
   Политики: block (заблокировать),
     direct (напрямую в обход туннеля),
     proxy (через туннель).

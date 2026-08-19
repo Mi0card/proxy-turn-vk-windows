@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.8"
+const AppVersion = "0.2.5.9"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -208,12 +208,16 @@ func (a *App) startup(ctx context.Context) {
 		a.proxy.SetRulesetManager(a.ruleset)
 		a.proxy.SetRulesets(a.getCfg().Rulesets)
 	}
-	// Асинхронно подгружаем правила (из кеша или сети).
-	go func() {
-		if err := a.ruleset.EnsureLoaded(); err != nil {
-			a.routingLog("Маршрутизация: правила не загружены: "+err.Error(), "warn")
-		}
-	}()
+	// Асинхронно подгружаем правила (из кеша или сети). Если настроены только
+	// встроенные правила (domain:/keyword:/...) или правил нет — скачивание не нужно,
+	// но при пустом списке всё равно прогреваем кеш для автоподсказок.
+	if len(a.getCfg().Rulesets) == 0 || needsDownloadedRulesets(a.getCfg().Rulesets) {
+		go func() {
+			if err := a.ruleset.EnsureLoaded(); err != nil {
+				a.routingLog("Маршрутизация: правила не загружены: "+err.Error(), "warn")
+			}
+		}()
+	}
 
 	// Крэш-восстановление: если остался бэкап системного прокси, значит прошлый
 	// сеанс завершился аварийно с включённым перенаправлением — возвращаем настройки.
@@ -1227,7 +1231,7 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 		// Нормализуем правило: добавляем префикс ruleset: если его нет
 		rc.Rule = normalizeRule(rc.Rule)
 		if !validateRule(rc.Rule) {
-			return "Некорректное правило: " + rc.Rule + " (ожидается ruleset:geosite-... или ruleset:geoip-...)"
+			return "Некорректное правило: " + rc.Rule + " (ожидается ruleset:geosite-..., ruleset:geoip-..., domain:<домен>, domain-suffix:<домен>, keyword:<текст>, regex:<шаблон>, cidr:<подсеть> или ip:<адрес>)"
 		}
 		if !validPolicy(rc.Policy) {
 			return "Некорректная политика: " + rc.Policy + " (допустимо: block, direct, proxy)"
@@ -1303,20 +1307,25 @@ func (a *App) UpdateRulesets() string {
 
 // EnsureRulesetsLoaded гарантирует, что правила загружены (из кеша или сети).
 // Возвращает "" при успехе или когда роутинг не настроен.
+// Если настроены только встроенные (inline) правила — domain:/keyword:/regex:/
+// cidr:/ip: — скачивание дата-файлов не требуется и не выполняется.
 func (a *App) EnsureRulesetsLoaded() string {
 	if a.ruleset == nil {
 		return ""
 	}
-	if len(a.getCfg().Rulesets) == 0 {
+	configs := a.getCfg().Rulesets
+	if len(configs) == 0 {
 		return ""
 	}
-	if err := a.ruleset.EnsureLoaded(); err != nil {
-		return err.Error()
+	if needsDownloadedRulesets(configs) {
+		if err := a.ruleset.EnsureLoaded(); err != nil {
+			return err.Error()
+		}
 	}
 	if a.proxy != nil {
-		a.proxy.SetRulesets(a.getCfg().Rulesets)
+		a.proxy.SetRulesets(configs)
 	}
-	if n := len(a.getCfg().Rulesets); n > 0 {
+	if n := len(configs); n > 0 {
 		a.routingLog(fmt.Sprintf("Маршрутизация: правила загружены, применено %d правил к прокси.", n), "info")
 	}
 	return ""

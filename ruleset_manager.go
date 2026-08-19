@@ -18,13 +18,21 @@ import (
 
 // ── Ruleset-based routing ────────────────────────────────────────────────
 //
-// Реализация маршрутизации по правилам (как в Throne), с офлайн-кешем
-// geosite.dat / geoip.dat из github.com/runetfreedom/russia-v2ray-rules-dat.
+// Реализация маршрутизации по правилам (как в Throne).
 //
-// Формат правила:  "ruleset:<тип>-<группа>"
-//   - ruleset:geosite-category-ru   — домены группы CATEGORY-RU из geosite.dat
-//   - ruleset:geosite-youtube       — домены группы YOUTUBE из geosite.dat
-//   - ruleset:geoip-private         — подсети группы PRIVATE из geoip.dat
+// Правила двух видов:
+//   1. Встроенные (inline) — не требуют скачивания дата-файлов:
+//        domain:<домен>        — точное совпадение домена
+//        domain-suffix:<домен> — домен и все поддомены
+//        keyword:<подстрока>   — подстрока в домене
+//        regex:<регулярка>     — регулярное выражение по домену
+//        cidr:<подсеть>        — IP-подсеть (например cidr:10.0.0.0/8)
+//        ip:<адрес>            — конкретный IP (например ip:1.2.3.4)
+//   2. Из офлайн-кеша geosite.dat / geoip.dat из
+//      github.com/runetfreedom/russia-v2ray-rules-dat:
+//        ruleset:geosite-category-ru  — домены группы CATEGORY-RU
+//        ruleset:geosite-youtube      — домены группы YOUTUBE
+//        ruleset:geoip-private        — подсети группы PRIVATE
 //
 // Политика правила: block | direct | proxy.
 
@@ -42,7 +50,7 @@ const (
 
 // RulesetConfig — одно правило маршрутизации, хранится в Config.
 type RulesetConfig struct {
-	Rule   string `json:"rule"`   // "ruleset:geosite-category-ru" / "ruleset:geoip-private"
+	Rule   string `json:"rule"`   // "ruleset:geosite-category-ru" / "domain:example.com" / "keyword:youtube" ...
 	Policy string `json:"policy"` // block | direct | proxy
 	Enable bool   `json:"enable"`
 }
@@ -371,23 +379,34 @@ func (m *RulesetManager) matchIP(configs []RulesetConfig, ip netip.Addr, fn func
 	m.mu.RLock()
 	geoip := m.geoip
 	m.mu.RUnlock()
-	if geoip == nil {
-		return false
-	}
+	ip = ip.Unmap()
 	stopped := false
 	for _, rc := range configs {
 		if !rc.Enable || rc.Policy == "" {
 			continue
 		}
-		typ, group := parseRule(rc.Rule)
-		if typ != "geoip" {
-			continue
+		typ, val := parseRule(rc.Rule)
+		matched := false
+		switch typ {
+		case "geoip":
+			if geoip == nil {
+				continue
+			}
+			g, ok := geoip[strings.ToUpper(val)]
+			if !ok {
+				continue
+			}
+			matched = prefixContains(g.cidrs, ip)
+		case "cidr":
+			if p, err := netip.ParsePrefix(strings.TrimSpace(val)); err == nil {
+				matched = p.Contains(ip)
+			}
+		case "ip":
+			if a, err := netip.ParseAddr(strings.TrimSpace(val)); err == nil {
+				matched = a.Unmap() == ip
+			}
 		}
-		g, ok := geoip[strings.ToUpper(group)]
-		if !ok {
-			continue
-		}
-		if prefixContains(g.cidrs, ip) {
+		if matched {
 			if fn(RoutingMatch{Rule: rc.Rule, Policy: rc.Policy}) {
 				stopped = true
 				break
@@ -401,9 +420,6 @@ func (m *RulesetManager) matchDomain(configs []RulesetConfig, host string, fn fu
 	m.mu.RLock()
 	geosite := m.geosite
 	m.mu.RUnlock()
-	if geosite == nil {
-		return false
-	}
 	d := normalizeDomain(host)
 	if d == "" {
 		return false
@@ -413,15 +429,30 @@ func (m *RulesetManager) matchDomain(configs []RulesetConfig, host string, fn fu
 		if !rc.Enable || rc.Policy == "" {
 			continue
 		}
-		typ, group := parseRule(rc.Rule)
-		if typ != "geosite" {
-			continue
+		typ, val := parseRule(rc.Rule)
+		matched := false
+		switch typ {
+		case "geosite":
+			if geosite == nil {
+				continue
+			}
+			g, ok := geosite[strings.ToUpper(val)]
+			if !ok {
+				continue
+			}
+			matched = g.matches(d)
+		case "domain":
+			matched = d == normalizeDomain(val)
+		case "domain-suffix":
+			matched = suffixMatch(d, val)
+		case "keyword":
+			matched = strings.Contains(d, strings.ToLower(strings.TrimSpace(val)))
+		case "regex":
+			if re, err := regexp.Compile(val); err == nil {
+				matched = re.MatchString(d)
+			}
 		}
-		g, ok := geosite[strings.ToUpper(group)]
-		if !ok {
-			continue
-		}
-		if g.matches(d) {
+		if matched {
 			if fn(RoutingMatch{Rule: rc.Rule, Policy: rc.Policy}) {
 				stopped = true
 				break
@@ -429,6 +460,26 @@ func (m *RulesetManager) matchDomain(configs []RulesetConfig, host string, fn fu
 		}
 	}
 	return stopped
+}
+
+// suffixMatch проверяет, что domain равен suffix или является его поддоменом.
+func suffixMatch(domain, suffix string) bool {
+	s := normalizeDomain(suffix)
+	if s == "" {
+		return false
+	}
+	cur := domain
+	for {
+		if cur == s {
+			return true
+		}
+		idx := strings.IndexByte(cur, '.')
+		if idx < 0 {
+			break
+		}
+		cur = cur[idx+1:]
+	}
+	return false
 }
 
 // matches проверяет домен на суффикс, точное совпадение и регулярки.
@@ -466,18 +517,40 @@ func prefixContains(cidrs []netip.Prefix, ip netip.Addr) bool {
 	return false
 }
 
-// parseRule разбирает "ruleset:geosite-category-ru" на ("geosite","CATEGORY-RU").
-func parseRule(rule string) (typ, group string) {
-	const prefix = "ruleset:"
-	if !strings.HasPrefix(rule, prefix) {
-		return "", ""
+// parseRule разбирает строку правила на (тип, значение).
+// Поддерживаемые форматы:
+//   ruleset:geosite-<группа>  /  ruleset:geoip-<группа>  — из скачанных .dat-файлов
+//   domain:<домен>            — точное совпадение домена
+//   domain-suffix:<домен>     — домен и все поддомены
+//   keyword:<подстрока>       — подстрока в домене
+//   regex:<регулярка>         — регулярное выражение по домену
+//   cidr:<подсеть>            — IP-подсеть (без скачивания geoip.dat)
+//   ip:<адрес>                — конкретный IP
+func parseRule(rule string) (typ, value string) {
+	rule = strings.TrimSpace(rule)
+	lower := strings.ToLower(rule)
+	switch {
+	case strings.HasPrefix(lower, "ruleset:"):
+		rest := rule[len("ruleset:"):]
+		idx := strings.IndexByte(rest, '-')
+		if idx < 0 {
+			return strings.ToLower(rest), ""
+		}
+		return strings.ToLower(rest[:idx]), rest[idx+1:]
+	case strings.HasPrefix(lower, "domain-suffix:"):
+		return "domain-suffix", rule[len("domain-suffix:"):]
+	case strings.HasPrefix(lower, "domain:"):
+		return "domain", rule[len("domain:"):]
+	case strings.HasPrefix(lower, "keyword:"):
+		return "keyword", rule[len("keyword:"):]
+	case strings.HasPrefix(lower, "regex:"):
+		return "regex", rule[len("regex:"):]
+	case strings.HasPrefix(lower, "cidr:"):
+		return "cidr", rule[len("cidr:"):]
+	case strings.HasPrefix(lower, "ip:"):
+		return "ip", rule[len("ip:"):]
 	}
-	rest := strings.TrimPrefix(rule, prefix)
-	idx := strings.IndexByte(rest, '-')
-	if idx < 0 {
-		return strings.ToLower(rest), ""
-	}
-	return strings.ToLower(rest[:idx]), rest[idx+1:]
+	return "", ""
 }
 
 // ── Парсинг protobuf ────────────────────────────────────────────────────
@@ -709,18 +782,54 @@ func parseCIDRMsg(b []byte) (netip.Prefix, bool) {
 	return pfx, true
 }
 
-// validateRule проверяет корректность строки правила вида ruleset:geoip-private.
+// validateRule проверяет корректность строки правила.
 func validateRule(rule string) bool {
-	typ, group := parseRule(rule)
-	return (typ == "geosite" || typ == "geoip") && group != ""
+	typ, val := parseRule(rule)
+	switch typ {
+	case "geosite", "geoip":
+		return val != ""
+	case "domain", "domain-suffix":
+		return normalizeDomain(val) != ""
+	case "keyword":
+		return strings.TrimSpace(val) != ""
+	case "regex":
+		_, err := regexp.Compile(val)
+		return err == nil
+	case "cidr":
+		_, err := netip.ParsePrefix(strings.TrimSpace(val))
+		return err == nil
+	case "ip":
+		_, err := netip.ParseAddr(strings.TrimSpace(val))
+		return err == nil
+	}
+	return false
 }
 
-// normalizeRule нормализует правило: если нет префикса "ruleset:", добавляет его.
+// normalizeRule нормализует правило: если нет известного префикса,
+// добавляет "ruleset:" (для обратной совместимости с вводом "geosite-xxx").
 func normalizeRule(rule string) string {
-	if !strings.HasPrefix(strings.ToLower(rule), "ruleset:") {
-		return "ruleset:" + rule
+	r := strings.TrimSpace(rule)
+	lower := strings.ToLower(r)
+	for _, prefix := range []string{
+		"ruleset:", "domain-suffix:", "domain:", "keyword:", "regex:", "cidr:", "ip:",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return r
+		}
 	}
-	return rule
+	return "ruleset:" + r
+}
+
+// needsDownloadedRulesets возвращает true, если среди правил есть хотя бы одно,
+// требующее скачанных geosite.dat / geoip.dat (ruleset:geosite-* / ruleset:geoip-*).
+// Чисто встроенные правила (domain:/keyword:/...) работают без скачивания.
+func needsDownloadedRulesets(configs []RulesetConfig) bool {
+	for _, rc := range configs {
+		if typ, _ := parseRule(rc.Rule); typ == "geosite" || typ == "geoip" {
+			return true
+		}
+	}
+	return false
 }
 
 // validPolicy возвращает true, если политика поддерживается.
