@@ -51,9 +51,9 @@ func main() {
 	wailsErr := wails.Run(&options.App{
 		Title:     "WinDTT  v" + AppVersion,
 		Width:     1050,
-		Height:    640,
+		Height:    720,
 		MinWidth:  980,
-		MinHeight: 580,
+		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

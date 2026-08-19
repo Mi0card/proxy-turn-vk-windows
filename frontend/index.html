@@ -126,6 +126,7 @@
                 <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               </button>
             </div>
+            <div class="fields--grid">
             <div class="field-row">
               <label>Fingerprint</label>
               <select id="fingerprint" class="sel">
@@ -138,23 +139,29 @@
             </div>
             <div class="field-row">
               <label>VPS адрес:порт <span class="flag">(-peer)</span></label>
-              <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
-              <button class="icon-btn" onclick="pasteInput('srv')" title="Вставить" aria-label="Вставить адрес из буфера обмена">
-                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
-              </button>
+              <div class="field-inp">
+                <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
+                <button class="icon-btn" onclick="pasteInput('srv')" title="Вставить" aria-label="Вставить адрес из буфера обмена">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+                </button>
+              </div>
             </div>
             <div class="field-row">
               <label>Secret <span class="flag">(-password)</span></label>
-              <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
-              <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
-              <button class="icon-btn" onclick="pasteInput('sec')" title="Вставить" aria-label="Вставить secret из буфера обмена">
-                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
-              </button>
+              <div class="field-inp">
+                <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
+                <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
+                <button class="icon-btn" onclick="pasteInput('sec')" title="Вставить" aria-label="Вставить secret из буфера обмена">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+                </button>
+              </div>
             </div>
             <div class="field-row">
               <label>Потоков <span class="flag">(-n)</span></label>
-              <input id="n-workers" type="number" class="inp inp-sm" value="9" min="1" max="108">
-              <span class="hint">кратно 9, макс 108</span>
+              <div class="field-inp">
+                <input id="n-workers" type="number" class="inp inp-sm" value="9" min="1" max="108">
+                <span class="hint">кратно 9, макс 108</span>
+              </div>
             </div>
             <div class="field-row">
               <label>Listen <span class="flag">(-listen)</span></label>
@@ -174,6 +181,7 @@
                 <option value="audio">audio (по умолчанию)</option>
                 <option value="video">video</option>
               </select>
+            </div>
             </div>
           </div>
 
