@@ -18,6 +18,36 @@ const state = {
   totalWorkers:   0,
 };
 
+// ── Иконки (inline SVG для динамической разметки) ───────────────────────────
+
+const ICO = {
+  clipboard: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
+  close:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  trash:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
+  up:      '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>',
+  down:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  moon:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
+  sun:     '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
+};
+
+// Заголовки вкладок (шапка контента)
+const TAB_META = {
+  connect: { title: 'Подключение',  sub: 'Настройка туннеля WireGuard over VK TURN' },
+  proxy:   { title: 'Прокси',       sub: 'SOCKS5 + HTTP прокси и системный прокси' },
+  routing: { title: 'Маршрутизация', sub: 'Правила распределения трафика' },
+  logs:    { title: 'Логи',         sub: 'События туннеля, прокси и маршрутизации' },
+  wg:      { title: 'WireGuard',    sub: 'Конфигурация WireGuard' },
+  deploy:  { title: 'Deploy',       sub: 'Установка wdtt-server на VPS' },
+  help:    { title: 'Справка',      sub: 'Инструкции и флаги wdtt-client' },
+};
+
+function setBtnLabel(btn, text) {
+  if (!btn) return;
+  const label = btn.querySelector('.btn-label');
+  if (label) label.textContent = text;
+  else btn.textContent = text;
+}
+
 // ── Toast (баннер ошибок вне вкладки Логи) ───────────────────────────────────
 
 function showToast(msg, lv = 'error') {
@@ -35,13 +65,16 @@ function showToast(msg, lv = 'error') {
 
 function setBusy(btn, busy, busyText) {
   if (!btn) return;
+  const label = btn.querySelector('.btn-label');
+  const getTxt = () => label ? label.textContent : btn.textContent;
+  const setTxt = (t) => { if (label) label.textContent = t; else btn.textContent = t; };
   if (busy) {
-    btn.dataset.label = btn.dataset.label || btn.textContent;
-    btn.textContent = busyText || '…';
+    if (!btn.dataset.label) btn.dataset.label = getTxt();
+    setTxt(busyText || '…');
     btn.disabled = true;
     btn.classList.add('is-busy');
   } else {
-    if (btn.dataset.label) btn.textContent = btn.dataset.label;
+    if (btn.dataset.label) setTxt(btn.dataset.label);
     btn.disabled = false;
     btn.classList.remove('is-busy');
   }
@@ -113,6 +146,8 @@ window.addEventListener('load', async () => {
   // Справка
   const ver = await window.go.main.App.GetVersion();
   document.getElementById('help-text').textContent = helpText(ver);
+  const sv = document.getElementById('sidebar-version');
+  if (sv) sv.textContent = 'v' + ver;
 
   log('WinDTT v' + ver + ' запущен', 'success');
   
@@ -157,6 +192,14 @@ function switchTab(name) {
   const panel = document.getElementById('tab-' + name);
   panel.classList.remove('hidden');
   panel.classList.add('active');
+
+  // Обновляем заголовок и подзаголовок в шапке
+  const meta = TAB_META[name] || { title: name, sub: '' };
+  const hTitle = document.getElementById('header-title');
+  const hSub = document.getElementById('header-subtitle');
+  if (hTitle) hTitle.textContent = meta.title;
+  if (hSub) hSub.textContent = meta.sub;
+
   // При переходе на логи — прокручиваем в конец
   if (name === 'logs') {
     const box = state.activeLogTab === 'socks'   ? document.getElementById('socks-log-box')
@@ -169,6 +212,11 @@ function switchTab(name) {
     state.routingLoaded = true;
     loadRoutingTab();
   }
+}
+
+// Свернуть / развернуть сайдбар
+function toggleSidebar() {
+  document.body.classList.toggle('sidebar-collapsed');
 }
 
 // ── Конфиг ────────────────────────────────────────────────────────────────────
@@ -392,11 +440,11 @@ function updateTunnelUI() {
   if (r && p) {
     statusEl.innerHTML = dot + 'Туннель пауза';
     statusEl.className = 'badge paused';
-    btnPause.textContent = '▶  Продолжить';
+    setBtnLabel(btnPause, 'Продолжить');
   } else if (r) {
     statusEl.innerHTML = dot + 'Туннель';
     statusEl.className = 'badge connected';
-    btnPause.textContent = '⏸  Пауза';
+    setBtnLabel(btnPause, 'Пауза');
   } else {
     statusEl.innerHTML = dot + 'Туннель выкл';
     statusEl.className = 'badge disconnected';
@@ -705,9 +753,9 @@ function renderRoutingList() {
         <option value="direct" ${rs.policy === 'direct' ? 'selected' : ''}>direct</option>
         <option value="block"  ${rs.policy === 'block'  ? 'selected' : ''}>block</option>
       </select>
-      <button class="btn btn-sm rr-up"   data-i="${i}" title="Вверх">↑</button>
-      <button class="btn btn-sm rr-down" data-i="${i}" title="Вниз">↓</button>
-      <button class="btn btn-sm rr-del"  data-i="${i}" title="Удалить">✕</button>
+      <button class="icon-btn rr-up"   data-i="${i}" title="Вверх">${ICO.up}</button>
+      <button class="icon-btn rr-down" data-i="${i}" title="Вниз">${ICO.down}</button>
+      <button class="icon-btn rr-del"  data-i="${i}" title="Удалить">${ICO.close}</button>
     </div>
   `).join('');
 
@@ -781,11 +829,11 @@ async function saveRoutingRules() {
   const configs = routingDraft.map(r => ({ rule: r.rule, policy: r.policy, enable: r.enable }));
   const btn = document.getElementById('btn-rules-save');
   const saved = document.getElementById('rules-saved');
-  if (btn) { btn.disabled = true; btn.textContent = '💾 Сохраняю…'; }
+  if (btn) { btn.disabled = true; setBtnLabel(btn, 'Сохраняю…'); }
   if (saved) saved.style.display = 'none';
   const err = await window.go.main.App.SetRulesets(configs);
   if (err) {
-    if (btn) { btn.disabled = false; btn.textContent = '💾 Сохранить'; }
+    if (btn) { btn.disabled = false; setBtnLabel(btn, 'Сохранить'); }
     showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); return;
   }
   // Убеждаемся, что правила загружены и применены к прокси.
@@ -802,10 +850,10 @@ async function saveRoutingRules() {
   renderRuleSuggest();
 
   // Визуальный индикатор: кнопка «Сохранить» и надпись «Сохранено»
-  if (btn) { btn.textContent = '✓ Сохранено'; btn.classList.add('saved'); }
+  if (btn) { setBtnLabel(btn, 'Сохранено'); btn.classList.add('saved'); }
   if (saved) saved.style.display = 'inline';
   setTimeout(() => {
-    if (btn) { btn.textContent = '💾 Сохранить'; btn.classList.remove('saved'); btn.disabled = false; }
+    if (btn) { setBtnLabel(btn, 'Сохранить'); btn.classList.remove('saved'); btn.disabled = false; }
     if (saved) saved.style.display = 'none';
   }, 1500);
 }
@@ -1304,12 +1352,13 @@ async function initTheme() {
 }
 
 function applyTheme(theme) {
+  const btn = document.getElementById('theme-btn');
   if (theme === 'light') {
     document.body.classList.add('light');
-    document.getElementById('theme-btn').textContent = '☀️';
+    if (btn) btn.innerHTML = ICO.sun;
   } else {
     document.body.classList.remove('light');
-    document.getElementById('theme-btn').textContent = '🌙';
+    if (btn) btn.innerHTML = ICO.moon;
   }
   // Сохраняем в конфиг Go — localStorage сбрасывается при перезапуске Wails
   if (window.go?.main?.App?.SetTheme) {
@@ -1330,8 +1379,8 @@ function addVkHash() {
   row.className = 'vk-hash-row';
   row.innerHTML = `
     <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
-    <button class="btn btn-sm" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">📋</button>
-    <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" title="Удалить" aria-label="Удалить хеш">✕</button>
+    <button class="icon-btn" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">${ICO.clipboard}</button>
+    <button class="icon-btn vk-remove" onclick="removeVkHash(this)" title="Удалить" aria-label="Удалить хеш">${ICO.close}</button>
   `;
   list.appendChild(row);
   updateRemoveButtons();
@@ -1374,11 +1423,11 @@ function setVkHashes(hashStr) {
     inp.placeholder = 'e5rA_78w7leYpoKiqtDb...';
     inp.value = h; // прямое присвоение — безопасно, не экранирует символы хеша
     const btnP = document.createElement('button');
-    btnP.className = 'btn btn-sm'; btnP.textContent = '📋';
+    btnP.className = 'icon-btn'; btnP.innerHTML = ICO.clipboard;
     btnP.title = 'Вставить'; btnP.setAttribute('aria-label', 'Вставить хеш из буфера обмена');
     btnP.onclick = function() { pasteVkHash(this); };
     const btnR = document.createElement('button');
-    btnR.className = 'btn btn-sm vk-remove'; btnR.textContent = '✕';
+    btnR.className = 'icon-btn vk-remove'; btnR.innerHTML = ICO.close;
     btnR.title = 'Удалить'; btnR.setAttribute('aria-label', 'Удалить хеш');
     btnR.onclick = function() { removeVkHash(this); };
     row.appendChild(inp); row.appendChild(btnP); row.appendChild(btnR);
@@ -1523,7 +1572,7 @@ DEPLOY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WIREGUARD
   Конфиг загружается автоматически при подключении.
-  Кнопки: 📋 Копировать  💾 Скачать .conf
+  Кнопки: Открыть · Копировать · Скачать .conf
   Используйте с официальным WireGuard клиентом.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

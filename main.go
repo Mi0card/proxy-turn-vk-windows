@@ -57,7 +57,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 255},
+		BackgroundColour: &options.RGBA{R: 11, G: 18, B: 32, A: 255},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		OnBeforeClose:    app.beforeClose,
@@ -68,7 +68,7 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
-			Theme:                windows.Dark,
+			Theme:                windows.SystemDefault,
 		},
 	})
 

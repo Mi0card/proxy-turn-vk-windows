@@ -10,308 +10,414 @@
 
 <div id="toast-box" class="toast-box" role="status" aria-live="polite" aria-atomic="true"></div>
 
-<!-- ── Топ-бар ── -->
-<header class="topbar">
-  <div class="topbar-row1">
-    <span class="logo">WinDTT</span>
-    <span class="subtitle">WireGuard over VK TURN</span>
-    <div class="topbar-right">
-      <span id="socks-badge" class="badge hidden"><span class="dot"></span></span>
-      <span id="speed-badge" class="badge hidden"></span>
-      <span id="traffic-badge" class="badge hidden"></span>
-      <span id="workers-badge" class="badge hidden"></span>
-      <span id="status-badge" class="badge disconnected"><span class="dot"></span> Туннель выкл</span>
-      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">🌙</button>
-    </div>
-  </div>
-  <div class="topbar-row2" id="sysproxy-row">
-    <label class="topbar-chk" title="Перенаправить WinINET-трафик (Chrome, Edge, Office) через туннель">
-      <input id="px-sysproxy" type="checkbox" onchange="onSysProxyToggle()">
-      Системный прокси
-    </label>
-  </div>
-</header>
+<div class="app-shell">
 
-<!-- ── Вкладки ── -->
-<nav class="tabs">
-  <button class="tab active" data-tab="connect" aria-label="Вкладка подключение">Подключение</button>
-  <button class="tab" data-tab="proxy" aria-label="Вкладка прокси">Proxy</button>
-  <button class="tab" data-tab="routing" aria-label="Вкладка маршрутизация">Маршрутизация</button>
-  <button class="tab" data-tab="logs" aria-label="Вкладка логи">Логи</button>
-  <button class="tab" data-tab="wg" aria-label="Вкладка WireGuard">WireGuard</button>
-  <button class="tab" data-tab="deploy" aria-label="Вкладка деплой">Deploy</button>
-  <button class="tab" data-tab="help" aria-label="Вкладка справка">Справка</button>
-</nav>
-
-<!-- ── Контент вкладок ── -->
-<main class="content">
-
-  <!-- Подключение -->
-  <section id="tab-connect" class="tab-panel active">
-    <div class="card">
-      <div class="card-title">Быстрая вставка wdtt:// ссылки</div>
-      <div class="row-flex">
-        <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
-        <button class="btn btn-sm" onclick="pasteInput('wlink')" title="Вставить" aria-label="Вставить ссылку из буфера обмена">📋</button>
-        <button class="btn btn-primary btn-sm" onclick="parseWdtt()" aria-label="Разобрать wdtt ссылку">Разобрать</button>
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo" aria-hidden="true">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">WinDTT</span>
+        <span class="brand-sub">WireGuard over VK TURN</span>
       </div>
     </div>
 
-    <div class="fields">
-      <div class="field-row field-row--top">
-        <label class="label--top">VK хеш &nbsp;(-vk)</label>
-        <div id="vk-list" class="vk-list">
-          <div class="vk-hash-row">
-            <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
-            <button class="btn btn-sm" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">📋</button>
-            <button class="btn btn-sm vk-remove" onclick="removeVkHash(this)" style="display:none" title="Удалить" aria-label="Удалить хеш">✕</button>
-          </div>
+    <nav class="sidebar-nav" aria-label="Основная навигация">
+      <button class="tab active" data-tab="connect" aria-label="Вкладка подключение">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span class="tab-label">Подключение</span>
+      </button>
+      <button class="tab" data-tab="proxy" aria-label="Вкладка прокси">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span class="tab-label">Прокси</span>
+      </button>
+      <button class="tab" data-tab="routing" aria-label="Вкладка маршрутизация">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+        <span class="tab-label">Маршрутизация</span>
+      </button>
+      <button class="tab" data-tab="logs" aria-label="Вкладка логи">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg>
+        <span class="tab-label">Логи</span>
+      </button>
+      <button class="tab" data-tab="wg" aria-label="Вкладка WireGuard">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        <span class="tab-label">WireGuard</span>
+      </button>
+      <button class="tab" data-tab="deploy" aria-label="Вкладка деплой">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg>
+        <span class="tab-label">Deploy</span>
+      </button>
+      <button class="tab" data-tab="help" aria-label="Вкладка справка">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+        <span class="tab-label">Справка</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <span class="sidebar-version" id="sidebar-version">v0.2.5.7</span>
+      <button id="theme-btn" class="icon-btn theme-icon" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="main">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <button class="icon-btn collapse-btn" onclick="toggleSidebar()" title="Свернуть меню" aria-label="Свернуть меню">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+        </button>
+        <div class="header-title-wrap">
+          <h1 class="header-title" id="header-title">Подключение</h1>
+          <span class="header-subtitle" id="header-subtitle">Настройка туннеля WireGuard over VK TURN</span>
         </div>
-        <button class="btn btn-sm btn-add-hash" onclick="addVkHash()" title="Добавить хеш" aria-label="Добавить хеш">+</button>
       </div>
-      <div class="field-row">
-        <label>Fingerprint</label>
-        <select id="fingerprint" class="sel">
-          <option value="firefox">firefox (по умолчанию)</option>
-          <option value="chrome">chrome</option>
-          <option value="safari">safari</option>
-          <option value="ios">ios</option>
-          <option value="android">android</option>
-        </select>
-      </div>
-      <div class="field-row">
-        <label>VPS адрес:порт &nbsp;(-peer)</label>
-        <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
-        <button class="btn btn-sm" onclick="pasteInput('srv')" title="Вставить" aria-label="Вставить адрес из буфера обмена">📋</button>
-      </div>
-      <div class="field-row">
-        <label>Secret &nbsp;(-password)</label>
-        <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
-        <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
-        <button class="btn btn-sm" onclick="pasteInput('sec')" title="Вставить" aria-label="Вставить secret из буфера обмена">📋</button>
-      </div>
-      <div class="field-row">
-        <label>Потоков &nbsp;(-n)</label>
-        <input id="n-workers" type="number" class="inp inp-sm" value="9" min="1" max="108">
-        <span class="hint">кратно 9, макс 108</span>
-      </div>
-      <div class="field-row">
-        <label>Listen &nbsp;(-listen)</label>
-        <input id="listen" type="text" class="inp inp-md" value="127.0.0.1:9000">
-      </div>
-      <div class="field-row">
-        <label>Режим капчи</label>
-        <select id="captcha-mode" class="sel">
-          <option value="auto">auto</option>
-          <option value="rjs">rjs</option>
-          <option value="wv">wv</option>
-        </select>
-      </div>
-      <div class="field-row">
-        <label>Маскировка &nbsp;(-obfs)</label>
-        <select id="obfs-mode" class="sel">
-          <option value="audio">audio (по умолчанию)</option>
-          <option value="video">video</option>
-        </select>
-      </div>
-    </div>
-
-    <div id="bin-status" class="bin-status"></div>
-
-    <div class="btn-row">
-      <button id="btn-connect" class="btn btn-connect" onclick="connect()" aria-label="Подключить туннель">▶  Подключить</button>
-      <button id="btn-pause"   class="btn btn-pause"   onclick="pauseResume()" disabled aria-label="Пауза/продолжить туннель">⏸  Пауза</button>
-      <button id="btn-stop"    class="btn btn-stop"    onclick="stop()" disabled aria-label="Остановить туннель">■  Стоп</button>
-    </div>
-
-    <div id="captcha-panel" class="card card--mt" style="display:none">
-      <div class="warn-text">⚠ Требуется капча — вставьте токен:</div>
-      <div class="row-flex">
-        <input id="captcha-token" type="text" class="inp mono" placeholder="токен капчи">
-        <button class="btn btn-sm" onclick="pasteInput('captcha-token')" title="Вставить" aria-label="Вставить токен капчи из буфера обмена">📋</button>
-        <button class="btn btn-primary btn-sm" onclick="sendCaptcha()" aria-label="Отправить токен капчи">Отправить</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- Прокси -->
-  <section id="tab-proxy" class="tab-panel hidden">
-    <div id="sysproxy-banner" class="proxy-status connected" style="display:none">
-      🌐 Системный прокси включён
-    </div>
-
-    <div id="proxy-status-label" class="proxy-status disconnected">● Локальный прокси выключен</div>
-
-    <div class="fields">
-      <div class="field-row">
-        <label>Хост</label>
-        <input id="px-host" type="text" class="inp inp-md" value="127.0.0.1">
-        <span class="hint">0.0.0.0 — доступен в сети</span>
-      </div>
-      <div class="field-row">
-        <label>SOCKS5 порт</label>
-        <input id="px-port" type="number" class="inp inp-sm" value="1080" min="1" max="65535">
-      </div>
-      <div class="field-row">
-        <label>HTTP порт</label>
-        <input id="px-http-port" type="number" class="inp inp-sm" value="1081" min="1" max="65535">
-      </div>
-      <div class="field-row">
-        <label>Авторизация</label>
-        <label class="chk-label"><input id="px-use-auth" type="checkbox" checked onchange="toggleAuth()"> логин/пароль</label>
-      </div>
-    </div>
-
-    <div id="auth-fields" class="fields">
-      <div class="field-row">
-        <label>Логин</label>
-        <input id="px-user" type="text" class="inp inp-md" placeholder="user">
-      </div>
-      <div class="field-row">
-        <label>Пароль</label>
-        <input id="px-pass" type="password" class="inp inp-md">
-        <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
-        <button class="btn btn-sm" title="Сгенерировать" aria-label="Сгенерировать пароль" onclick="genPass()">🎲</button>
-      </div>
-    </div>
-
-    <div class="btn-row">
-      <button id="btn-pstart" class="btn btn-connect" onclick="proxyStart()" aria-label="Запустить прокси">▶  Запустить</button>
-      <button id="btn-pstop"  class="btn btn-stop"   onclick="proxyStop()" disabled aria-label="Остановить прокси">■  Остановить</button>
-    </div>
-
-    <div id="proxy-hint" class="hint-box" style="display:none"></div>
-  </section>
-
-  <!-- Роутинг -->
-  <section id="tab-routing" class="tab-panel hidden">
-    <div class="routing-head">
-      <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
-      <div class="row-flex">
-        <label class="rules-via-tunnel" title="GitHub может быть недоступен без туннеля — скачивать geosite/geoip через активный туннель">
-          <input type="checkbox" id="rr-via-tunnel"> обновлять через туннель
+      <div class="header-right">
+        <label id="sysproxy-row" class="sysproxy-pill" title="Перенаправить WinINET-трафик (Chrome, Edge, Office) через туннель">
+          <input id="px-sysproxy" type="checkbox" onchange="onSysProxyToggle()">
+          <span class="sysproxy-label">Системный прокси</span>
         </label>
-        <button id="btn-rules-update" class="btn btn-sm" onclick="updateAllRulesets()">🔄 Обновить правила</button>
+        <span id="socks-badge" class="pill hidden"><span class="dot"></span></span>
+        <span id="speed-badge" class="pill hidden"></span>
+        <span id="traffic-badge" class="pill hidden"></span>
+        <span id="workers-badge" class="pill hidden"></span>
+        <span id="status-badge" class="pill disconnected"><span class="dot"></span> Туннель выкл</span>
       </div>
-    </div>
+    </header>
 
-    <div id="rules-progress" class="rules-progress" style="display:none">
-      <div class="rules-progress-track"><div id="rules-progress-bar" class="rules-progress-bar indeterminate"></div></div>
-      <span id="rules-progress-label" class="rules-progress-label">Загрузка правил…</span>
-    </div>
+    <!-- ── Контент вкладок ── -->
+    <main class="content">
 
-    <div class="card">
-      <div class="card-title">Правила маршрутизации</div>
-      <p class="hint hint--spaced">
-        Формат: <code>geosite-category-ru</code>, <code>geoip-private</code>,
-        а также встроенные правила <code>domain:example.com</code> (точно),
-        <code>domain-suffix:example.com</code> (домен + поддомены),
-        <code>keyword:text</code>, <code>regex:\.example\.com$</code>,
-        <code>cidr:10.0.0.0/8</code>, <code>ip:1.2.3.4</code> — они работают без скачивания правил.
-        Правила применяются сверху вниз — первое совпадение выигрывает.
-        Политики: <b>block</b> (заблокировать), <b>direct</b> (напрямую, в обход туннеля),
-        <b>proxy</b> (через туннель).
-        <br>Подсказки: начните вводить, чтобы увидеть доступные правила.
-      </p>
-      <div class="row-flex rr-input-wrap">
-        <input id="rr-new" type="text" class="inp mono" placeholder="geosite-category-ru / domain:example.com / keyword:youtube">
-        <datalist id="ruleset-options"></datalist>
-        <button class="btn btn-primary btn-sm" onclick="addRoutingRule()">+ Добавить</button>
-        <div id="rr-suggest" class="rr-suggest" style="display:none"></div>
-      </div>
-    </div>
-
-    <div id="ruleset-list" class="ruleset-list">
-      <!-- Динамический список правил -->
-    </div>
-
-    <div class="btn-row">
-      <button id="btn-rules-save" class="btn btn-primary" onclick="saveRoutingRules()">💾 Сохранить</button>
-      <span id="rules-saved" class="rules-saved" style="display:none">✓ Правила сохранены</span>
-    </div>
-  </section>
-
-  <!-- Deploy -->
-  <section id="tab-deploy" class="tab-panel hidden">
-    <div class="deploy-layout">
-
-      <!-- Левая панель — поля -->
-      <div class="deploy-fields">
-        <div class="fields">
-          <div class="field-row">
-            <label>IP адрес VPS</label>
-            <input id="d-ip"   type="text" class="inp inp-md" placeholder="185.x.x.x">
+      <!-- Подключение -->
+      <section id="tab-connect" class="tab-panel active">
+        <div class="card">
+          <div class="card-title">Быстрая вставка wdtt:// ссылки</div>
+          <div class="row-flex">
+            <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
+            <button class="icon-btn" onclick="pasteInput('wlink')" title="Вставить" aria-label="Вставить ссылку из буфера обмена">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </button>
+            <button class="btn btn-primary" onclick="parseWdtt()" aria-label="Разобрать wdtt ссылку">Разобрать</button>
           </div>
-          <div class="field-row">
-            <label>SSH порт</label>
-            <input id="d-port" type="text" class="inp inp-sm" value="22">
-          </div>
-          <div class="field-row">
-            <label>Пользователь</label>
-            <input id="d-user" type="text" class="inp inp-md" placeholder="root">
-          </div>
-          <div class="field-row">
-            <label>Пароль SSH</label>
-            <input id="d-pwd"  type="password" class="inp inp-md">
-          </div>
-          <div class="field-row">
-            <label>WireGuard порт</label>
-            <input id="d-wg"   type="text" class="inp inp-sm" value="51820">
-          </div>
-          <div class="field-row">
-            <label>WinDTT порт</label>
-            <input id="d-wdtt" type="text" class="inp inp-sm" value="56000">
-          </div>
-
         </div>
 
-        <div class="fields">
-          <div class="field-row">
-            <label>Пароль туннеля</label>
-            <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
-            <button class="btn btn-sm" onclick="genDeployPass()" title="Сгенерировать" aria-label="Сгенерировать пароль туннеля">🎲</button>
+        <div class="card">
+          <div class="card-title">Параметры подключения</div>
+          <div class="fields">
+            <div class="field-row field-row--top">
+              <label class="label--top">VK хеш <span class="flag">(-vk)</span></label>
+              <div id="vk-list" class="vk-list">
+                <div class="vk-hash-row">
+                  <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
+                  <button class="icon-btn" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+                  </button>
+                  <button class="icon-btn vk-remove" onclick="removeVkHash(this)" style="display:none" title="Удалить" aria-label="Удалить хеш">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
+              <button class="icon-btn btn-add-hash" onclick="addVkHash()" title="Добавить хеш" aria-label="Добавить хеш">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+            </div>
+            <div class="field-row">
+              <label>Fingerprint</label>
+              <select id="fingerprint" class="sel">
+                <option value="firefox">firefox (по умолчанию)</option>
+                <option value="chrome">chrome</option>
+                <option value="safari">safari</option>
+                <option value="ios">ios</option>
+                <option value="android">android</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label>VPS адрес:порт <span class="flag">(-peer)</span></label>
+              <input id="srv" type="text" class="inp" placeholder="168.222.254.89:56000">
+              <button class="icon-btn" onclick="pasteInput('srv')" title="Вставить" aria-label="Вставить адрес из буфера обмена">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+              </button>
+            </div>
+            <div class="field-row">
+              <label>Secret <span class="flag">(-password)</span></label>
+              <input id="sec" type="password" class="inp" placeholder="ukx73a9k">
+              <label class="chk-label"><input type="checkbox" onchange="togglePass('sec',this)"> показать</label>
+              <button class="icon-btn" onclick="pasteInput('sec')" title="Вставить" aria-label="Вставить secret из буфера обмена">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+              </button>
+            </div>
+            <div class="field-row">
+              <label>Потоков <span class="flag">(-n)</span></label>
+              <input id="n-workers" type="number" class="inp inp-sm" value="9" min="1" max="108">
+              <span class="hint">кратно 9, макс 108</span>
+            </div>
+            <div class="field-row">
+              <label>Listen <span class="flag">(-listen)</span></label>
+              <input id="listen" type="text" class="inp inp-md" value="127.0.0.1:9000">
+            </div>
+            <div class="field-row">
+              <label>Режим капчи</label>
+              <select id="captcha-mode" class="sel">
+                <option value="auto">auto</option>
+                <option value="rjs">rjs</option>
+                <option value="wv">wv</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label>Маскировка <span class="flag">(-obfs)</span></label>
+              <select id="obfs-mode" class="sel">
+                <option value="audio">audio (по умолчанию)</option>
+                <option value="video">video</option>
+              </select>
+            </div>
           </div>
+
+          <div id="bin-status" class="bin-status"></div>
+
+          <div class="btn-row">
+            <button id="btn-connect" class="btn btn-connect" onclick="connect()" aria-label="Подключить туннель">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+              <span class="btn-label">Подключить</span>
+            </button>
+            <button id="btn-pause" class="btn btn-pause" onclick="pauseResume()" disabled aria-label="Пауза/продолжить туннель">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              <span class="btn-label">Пауза</span>
+            </button>
+            <button id="btn-stop" class="btn btn-stop" onclick="stop()" disabled aria-label="Остановить туннель">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+              <span class="btn-label">Стоп</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="captcha-panel" class="card card--mt" style="display:none">
+          <div class="warn-text">Требуется капча — вставьте токен:</div>
+          <div class="row-flex">
+            <input id="captcha-token" type="text" class="inp mono" placeholder="токен капчи">
+            <button class="icon-btn" onclick="pasteInput('captcha-token')" title="Вставить" aria-label="Вставить токен капчи из буфера обмена">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+            </button>
+            <button class="btn btn-primary" onclick="sendCaptcha()" aria-label="Отправить токен капчи">Отправить</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Прокси -->
+      <section id="tab-proxy" class="tab-panel hidden">
+        <div id="sysproxy-banner" class="proxy-status connected" style="display:none">
+          <span class="status-dot"></span> Системный прокси включён
+        </div>
+
+        <div id="proxy-status-label" class="proxy-status disconnected">● Локальный прокси выключен</div>
+
+        <div class="card">
+          <div class="card-title">Настройки прокси</div>
+          <div class="fields">
+            <div class="field-row">
+              <label>Хост</label>
+              <input id="px-host" type="text" class="inp inp-md" value="127.0.0.1">
+              <span class="hint">0.0.0.0 — доступен в сети</span>
+            </div>
+            <div class="field-row">
+              <label>SOCKS5 порт</label>
+              <input id="px-port" type="number" class="inp inp-sm" value="1080" min="1" max="65535">
+            </div>
+            <div class="field-row">
+              <label>HTTP порт</label>
+              <input id="px-http-port" type="number" class="inp inp-sm" value="1081" min="1" max="65535">
+            </div>
+            <div class="field-row">
+              <label>Авторизация</label>
+              <label class="chk-label"><input id="px-use-auth" type="checkbox" checked onchange="toggleAuth()"> логин/пароль</label>
+            </div>
+          </div>
+
+          <div id="auth-fields" class="fields">
+            <div class="field-row">
+              <label>Логин</label>
+              <input id="px-user" type="text" class="inp inp-md" placeholder="user">
+            </div>
+            <div class="field-row">
+              <label>Пароль</label>
+              <input id="px-pass" type="password" class="inp inp-md">
+              <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
+              <button class="icon-btn" title="Сгенерировать" aria-label="Сгенерировать пароль" onclick="genPass()">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="btn-pstart" class="btn btn-connect" onclick="proxyStart()" aria-label="Запустить прокси">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+              <span class="btn-label">Запустить</span>
+            </button>
+            <button id="btn-pstop" class="btn btn-stop" onclick="proxyStop()" disabled aria-label="Остановить прокси">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+              <span class="btn-label">Остановить</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="proxy-hint" class="hint-box" style="display:none"></div>
+      </section>
+
+      <!-- Роутинг -->
+      <section id="tab-routing" class="tab-panel hidden">
+        <div class="routing-head">
+          <div id="routing-status" class="proxy-status disconnected">● Правила не загружены</div>
+          <div class="row-flex">
+            <label class="rules-via-tunnel" title="GitHub может быть недоступен без туннеля — скачивать geosite/geoip через активный туннель">
+              <input type="checkbox" id="rr-via-tunnel"> обновлять через туннель
+            </label>
+            <button id="btn-rules-update" class="btn btn-sm" onclick="updateAllRulesets()">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg>
+              <span class="btn-label">Обновить правила</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="rules-progress" class="rules-progress" style="display:none">
+          <div class="rules-progress-track"><div id="rules-progress-bar" class="rules-progress-bar indeterminate"></div></div>
+          <span id="rules-progress-label" class="rules-progress-label">Загрузка правил…</span>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Правила маршрутизации</div>
+          <p class="hint hint--spaced">
+            Формат: <code>geosite-category-ru</code>, <code>geoip-private</code>,
+            а также встроенные правила <code>domain:example.com</code> (точно),
+            <code>domain-suffix:example.com</code> (домен + поддомены),
+            <code>keyword:text</code>, <code>regex:\.example\.com$</code>,
+            <code>cidr:10.0.0.0/8</code>, <code>ip:1.2.3.4</code> — они работают без скачивания правил.
+            Правила применяются сверху вниз — первое совпадение выигрывает.
+            Политики: <b>block</b> (заблокировать), <b>direct</b> (напрямую, в обход туннеля),
+            <b>proxy</b> (через туннель).
+            <br>Подсказки: начните вводить, чтобы увидеть доступные правила.
+          </p>
+          <div class="row-flex rr-input-wrap">
+            <input id="rr-new" type="text" class="inp mono" placeholder="geosite-category-ru / domain:example.com / keyword:youtube">
+            <datalist id="ruleset-options"></datalist>
+            <button class="btn btn-primary btn-sm" onclick="addRoutingRule()">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              <span class="btn-label">Добавить</span>
+            </button>
+            <div id="rr-suggest" class="rr-suggest" style="display:none"></div>
+          </div>
+        </div>
+
+        <div id="ruleset-list" class="ruleset-list">
+          <!-- Динамический список правил -->
         </div>
 
         <div class="btn-row">
-          <button id="btn-deploy" class="btn btn-primary" onclick="deploy()" aria-label="Установить wdtt-server">🚀  Установить wdtt-server</button>
-          <button id="btn-undeploy" class="btn btn-stop" onclick="undeploy()" aria-label="Удалить wdtt-server">🗑  Удалить</button>
+          <button id="btn-rules-save" class="btn btn-primary" onclick="saveRoutingRules()">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+            <span class="btn-label">Сохранить</span>
+          </button>
+          <span id="rules-saved" class="rules-saved" style="display:none">Правила сохранены</span>
         </div>
-        <p class="hint hint--spaced">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
+      </section>
 
-        <details class="advanced-block">
-          <summary>Расширенные настройки сервера</summary>
-          <div class="fields fields--top">
+      <!-- Deploy -->
+      <section id="tab-deploy" class="tab-panel hidden">
+        <div class="deploy-layout">
 
-
-            <div class="field-row">
-              <label>Admin Telegram ID</label>
-              <input id="d-admin-id" type="text" class="inp inp-md" placeholder="опционально" title="Ваш Telegram ID — кто может управлять ботом">
+          <!-- Левая панель — поля -->
+          <div class="deploy-fields">
+            <div class="card">
+              <div class="card-title">Параметры VPS</div>
+              <div class="fields">
+                <div class="field-row">
+                  <label>IP адрес VPS</label>
+                  <input id="d-ip"   type="text" class="inp inp-md" placeholder="185.x.x.x">
+                </div>
+                <div class="field-row">
+                  <label>SSH порт</label>
+                  <input id="d-port" type="text" class="inp inp-sm" value="22">
+                </div>
+                <div class="field-row">
+                  <label>Пользователь</label>
+                  <input id="d-user" type="text" class="inp inp-md" placeholder="root">
+                </div>
+                <div class="field-row">
+                  <label>Пароль SSH</label>
+                  <input id="d-pwd"  type="password" class="inp inp-md">
+                </div>
+                <div class="field-row">
+                  <label>WireGuard порт</label>
+                  <input id="d-wg"   type="text" class="inp inp-sm" value="51820">
+                </div>
+                <div class="field-row">
+                  <label>WinDTT порт</label>
+                  <input id="d-wdtt" type="text" class="inp inp-sm" value="56000">
+                </div>
+              </div>
             </div>
-            <div class="field-row">
-              <label>Bot Token</label>
-              <input id="d-bot-token" type="text" class="inp inp-md" placeholder="опционально" title="Telegram-бот для управления сервером">
+
+            <div class="card">
+              <div class="card-title">Туннель</div>
+              <div class="fields">
+                <div class="field-row">
+                  <label>Пароль туннеля</label>
+                  <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
+                  <button class="icon-btn" onclick="genDeployPass()" title="Сгенерировать" aria-label="Сгенерировать пароль туннеля">
+                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
+
+            <div class="btn-row">
+              <button id="btn-deploy" class="btn btn-primary" onclick="deploy()" aria-label="Установить wdtt-server">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
+                <span class="btn-label">Установить wdtt-server</span>
+              </button>
+              <button id="btn-undeploy" class="btn btn-stop" onclick="undeploy()" aria-label="Удалить wdtt-server">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                <span class="btn-label">Удалить</span>
+              </button>
+            </div>
+            <p class="hint hint--spaced">Скачивает wdtt-server из amurcanov/releases и запускает на VPS через systemd.</p>
+
+            <details class="advanced-block">
+              <summary>Расширенные настройки сервера</summary>
+              <div class="fields fields--top">
+                <div class="field-row">
+                  <label>Admin Telegram ID</label>
+                  <input id="d-admin-id" type="text" class="inp inp-md" placeholder="опционально" title="Ваш Telegram ID — кто может управлять ботом">
+                </div>
+                <div class="field-row">
+                  <label>Bot Token</label>
+                  <input id="d-bot-token" type="text" class="inp inp-md" placeholder="опционально" title="Telegram-бот для управления сервером">
+                </div>
+              </div>
+            </details>
           </div>
-        </details>
-      </div>
 
-      <!-- Правая панель — лог деплоя -->
-      <div class="deploy-log-panel">
-        <div class="deploy-log-header">
-          <span class="log-title">DEPLOY LOG</span>
-          <button class="btn btn-sm" onclick="clearDeployLog()" aria-label="Очистить лог деплоя">Очистить</button>
+          <!-- Правая панель — лог деплоя -->
+          <div class="deploy-log-panel">
+            <div class="deploy-log-header">
+              <span class="log-title">DEPLOY LOG</span>
+              <button class="btn btn-sm" onclick="clearDeployLog()" aria-label="Очистить лог деплоя">Очистить</button>
+            </div>
+            <div id="deploy-log-box" class="deploy-log-box" data-empty-text="Лог деплоя появится здесь после запуска."></div>
+          </div>
+
         </div>
-        <div id="deploy-log-box" class="deploy-log-box" data-empty-text="Лог деплоя появится здесь после запуска."></div>
-      </div>
+      </section>
 
-    </div>
-  </section>
-
-  <!-- WireGuard -->
-  <section id="tab-wg" class="tab-panel hidden">
-    <p class="hint">Конфиг загружается автоматически при подключении туннеля. Можно также открыть существующий .conf файл.</p>
-    <textarea id="wg-conf" class="wg-conf" spellcheck="false">[Interface]
+      <!-- WireGuard -->
+      <section id="tab-wg" class="tab-panel hidden">
+        <div class="card">
+          <div class="card-title">WireGuard конфиг</div>
+          <p class="hint hint--spaced">Конфиг загружается автоматически при подключении туннеля. Можно также открыть существующий .conf файл.</p>
+          <textarea id="wg-conf" class="wg-conf" spellcheck="false">[Interface]
 PrivateKey = &lt;ваш_ключ&gt;
 Address = 10.0.0.2/32
 MTU = 1280
@@ -323,47 +429,63 @@ Endpoint = 127.0.0.1:9000
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 </textarea>
-    <div class="btn-row">
-      <button class="btn" onclick="wgOpen()" aria-label="Открыть WireGuard конфиг">📂 Открыть</button>
-      <button class="btn" onclick="wgCopy()" aria-label="Копировать WireGuard конфиг">📋 Копировать</button>
-      <button class="btn" onclick="wgSave()" aria-label="Скачать WireGuard конфиг">💾 Скачать .conf</button>
-      <span id="wg-copy-hint" class="hint" style="display:none">✔ Скопировано!</span>
-    </div>
-  </section>
-
-  <!-- Логи -->
-  <section id="tab-logs" class="tab-panel hidden">
-    <div class="log-panel-inner">
-      <div class="log-header">
-        <div class="log-tabs">
-          <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')" aria-label="Переключить на лог туннеля">Туннель</button>
-          <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')" aria-label="Переключить на лог прокси">Прокси</button>
-          <button class="log-tab" id="ltab-routing" onclick="switchLogTab('routing')" aria-label="Переключить на лог маршрутизации">Маршрутизация</button>
+          <div class="btn-row">
+            <button class="btn" onclick="wgOpen()" aria-label="Открыть WireGuard конфиг">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+              <span class="btn-label">Открыть</span>
+            </button>
+            <button class="btn" onclick="wgCopy()" aria-label="Копировать WireGuard конфиг">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span class="btn-label">Копировать</span>
+            </button>
+            <button class="btn" onclick="wgSave()" aria-label="Скачать WireGuard конфиг">
+              <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+              <span class="btn-label">Скачать .conf</span>
+            </button>
+            <span id="wg-copy-hint" class="hint" style="display:none">Скопировано!</span>
+          </div>
         </div>
-        <div class="log-filters" id="log-filter-row">
-          <span class="filter-label">Фильтр:</span>
-          <label class="radio-label"><input type="radio" name="lf" value="all" checked onchange="setFilter('all')"> Все</label>
-          <label class="radio-label"><input type="radio" name="lf" value="info" onchange="setFilter('info')"> Info</label>
-          <label class="radio-label"><input type="radio" name="lf" value="warn" onchange="setFilter('warn')"> Warn</label>
-          <label class="radio-label"><input type="radio" name="lf" value="error" onchange="setFilter('error')"> Error</label>
-        </div>
-        <div class="log-btns">
-          <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог" aria-label="Сохранить лог в файл">💾</button>
-          <button class="btn btn-sm" onclick="clearLog()" aria-label="Очистить лог">Очистить</button>
-        </div>
-      </div>
-      <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
-      <div id="socks-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события прокси."></div>
-      <div id="routing-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события маршрутизации."></div>
-    </div>
-  </section>
+      </section>
 
-  <!-- Справка -->
-  <section id="tab-help" class="tab-panel hidden">
-    <pre class="help-text" id="help-text"></pre>
-  </section>
+      <!-- Логи -->
+      <section id="tab-logs" class="tab-panel hidden">
+        <div class="log-panel-inner">
+          <div class="log-header">
+            <div class="log-tabs">
+              <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')" aria-label="Переключить на лог туннеля">Туннель</button>
+              <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')" aria-label="Переключить на лог прокси">Прокси</button>
+              <button class="log-tab" id="ltab-routing" onclick="switchLogTab('routing')" aria-label="Переключить на лог маршрутизации">Маршрутизация</button>
+            </div>
+            <div class="log-filters" id="log-filter-row">
+              <span class="filter-label">Фильтр:</span>
+              <label class="radio-label"><input type="radio" name="lf" value="all" checked onchange="setFilter('all')"> Все</label>
+              <label class="radio-label"><input type="radio" name="lf" value="info" onchange="setFilter('info')"> Info</label>
+              <label class="radio-label"><input type="radio" name="lf" value="warn" onchange="setFilter('warn')"> Warn</label>
+              <label class="radio-label"><input type="radio" name="lf" value="error" onchange="setFilter('error')"> Error</label>
+            </div>
+            <div class="log-btns">
+              <button class="btn btn-sm" onclick="saveLog()" title="Сохранить лог" aria-label="Сохранить лог в файл">
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+              </button>
+              <button class="btn btn-sm" onclick="clearLog()" aria-label="Очистить лог">Очистить</button>
+            </div>
+          </div>
+          <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
+          <div id="socks-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события прокси."></div>
+          <div id="routing-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события маршрутизации."></div>
+        </div>
+      </section>
 
-</main>
+      <!-- Справка -->
+      <section id="tab-help" class="tab-panel hidden">
+        <div class="card">
+          <pre class="help-text" id="help-text"></pre>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
 
 <script src="main.js"></script>
 </body>
