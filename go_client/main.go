@@ -310,9 +310,7 @@ func main() {
 			}
 			fmt.Println()
 			fmt.Println("╔══════════════ WireGuard Конфиг ══════════════╗")
-			for _, line := range strings.Split(finalConf, "\n") {
-				fmt.Printf("║ %-44s ║\n", line)
-			}
+			fmt.Println(finalConf)
 			fmt.Println("╚══════════════════════════════════════════════╝")
 			if err := os.WriteFile("wg-turn.conf", []byte(finalConf+"\n"), 0600); err != nil {
 				log.Printf("[КОНФИГ] Ошибка сохранения: %v", err)

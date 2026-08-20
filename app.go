@@ -697,6 +697,12 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	lastStage := ""
 
+	// WireGuard конфиг печатается блоком (рамка ╔…╚). Буферизуем его целиком
+	// и отдаём одной записью, чтобы сообщения из параллельного потока (stderr)
+	// не вклинивались внутрь конфига в общем логе.
+	var wgBoxBuf []string
+	inWgBox := false
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -704,6 +710,25 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 		}
 
 		ll := strings.ToLower(line)
+
+		// Блок WireGuard конфига — копим строки рамки, сбрасываем по нижней.
+		if inWgBox || strings.Contains(line, "WireGuard Конфиг") {
+			wgBoxBuf = append(wgBoxBuf, line)
+			if strings.Contains(line, "WireGuard Конфиг") {
+				inWgBox = true
+			}
+			if strings.HasPrefix(line, "╚") {
+				inWgBox = false
+				a.log("   "+strings.Join(wgBoxBuf, "\n"), "info")
+				wgBoxBuf = nil
+			} else if len(wgBoxBuf) > 64 {
+				// Страховка: блок оборвался — не глотаем остальной лог.
+				inWgBox = false
+				a.log("   "+strings.Join(wgBoxBuf, "\n"), "info")
+				wgBoxBuf = nil
+			}
+			continue
+		}
 
 		// Статистика — парсим для статус-бара, но в лог не выводим
 		if reStat.MatchString(line) {
