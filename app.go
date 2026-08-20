@@ -468,9 +468,16 @@ var (
 	reAdminID  = regexp.MustCompile(`^\d{1,20}$`)
 )
 
+// socksLog разделяет события прокси на два потока:
+//   - строки соединений (начинаются с "→ ") → событие socks:log (вкладка «Подключения»);
+//   - события жизни прокси (старт/стоп/системный прокси) → событие log (вкладка «Общий»).
 func (a *App) socksLog(msg, lv string) {
 	ts := time.Now().Format("15:04:05")
-	runtime.EventsEmit(a.ctx, "socks:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+	if strings.HasPrefix(msg, "→ ") {
+		runtime.EventsEmit(a.ctx, "socks:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+		return
+	}
+	runtime.EventsEmit(a.ctx, "log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
 
 func (a *App) onProxyStats(stats ProxyStats) {
@@ -482,9 +489,10 @@ func (a *App) deployLog(msg, lv string) {
 	runtime.EventsEmit(a.ctx, "deploy:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
 
+// routingLog пишет события маршрутизации в общий лог (вкладка «Общий»).
 func (a *App) routingLog(msg, lv string) {
 	ts := time.Now().Format("15:04:05")
-	runtime.EventsEmit(a.ctx, "routing:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+	runtime.EventsEmit(a.ctx, "log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
 
 // onRulesetProgress транслирует прогресс скачивания правил в UI.
@@ -697,7 +705,7 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 
 		ll := strings.ToLower(line)
 
-		// Статистика — всегда dim
+		// Статистика — парсим для статус-бара, но в лог не выводим
 		if reStat.MatchString(line) {
 			if m := reWorkers.FindStringSubmatch(line); m != nil {
 				var n int
@@ -740,7 +748,6 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 					"speedKBs":  speedKBs,
 				})
 			}
-			a.log("   "+line, "dim")
 			continue
 		}
 

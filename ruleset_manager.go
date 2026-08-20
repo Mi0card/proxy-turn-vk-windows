@@ -366,13 +366,17 @@ func normalizeDomain(d string) string {
 // совпал. Возвращает true, если fn вернула true (т.е. нужно остановиться).
 func (m *RulesetManager) MatchRules(configs []RulesetConfig, host string, fn func(RoutingMatch) bool) bool {
 	h := host
-	if i := strings.LastIndexByte(h, ':'); i > 0 && strings.Count(h, ":") == 1 {
-		h = h[:i] // убрать порт для IPv4/hostname
+	if strings.HasPrefix(h, "[") {
+		if i := strings.LastIndexByte(h, ']'); i >= 0 {
+			h = h[:i+1] // "[::1]" — IPv6 без порта
+		}
+	} else if i := strings.LastIndexByte(h, ':'); i > 0 && strings.Count(h, ":") == 1 {
+		h = h[:i] // hostname:port / IPv4:port
 	}
 	if ip, err := netip.ParseAddr(strings.Trim(h, "[]")); err == nil {
 		return m.matchIP(configs, ip, fn)
 	}
-	return m.matchDomain(configs, host, fn)
+	return m.matchDomain(configs, h, fn)
 }
 
 func (m *RulesetManager) matchIP(configs []RulesetConfig, ip netip.Addr, fn func(RoutingMatch) bool) bool {

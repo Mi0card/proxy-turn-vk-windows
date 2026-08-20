@@ -252,6 +252,49 @@ func TestMatchRulesIP(t *testing.T) {
 	}
 }
 
+// ── Матчинг хоста с портом (CONNECT) ─────────────────────────────────────────
+
+func TestMatchRulesHostWithPort(t *testing.T) {
+	m := NewRulesetManager("")
+	parsed, err := parseGeositeFile(writeFixture(t, "geosite.dat",
+		pbBytes(1, geositeGroup("CATEGORY-RU", geositeDomain(2, "example.com"))),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	geoip, err := parseGeoIPFile(writeFixture(t, "geoip.dat",
+		pbBytes(1, geoipCountry("PRIVATE", geoipCIDR(netip.MustParseAddr("10.0.0.0"), 8))),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.geosite = parsed
+	m.geoip = geoip
+	m.loaded = true
+
+	domain := []RulesetConfig{{Rule: "ruleset:geosite-category-ru", Policy: "block", Enable: true}}
+	ip := []RulesetConfig{{Rule: "ruleset:geoip-private", Policy: "direct", Enable: true}}
+
+	// CONNECT-хосты приходят с портом — порт должен срезаться перед матчингом.
+	if !m.MatchRules(domain, "sub.example.com:443", func(match RoutingMatch) bool {
+		return match.Policy == "block"
+	}) {
+		t.Error("sub.example.com:443 должен матчить geosite (порт срезается)")
+	}
+	if !m.MatchRules(ip, "10.1.2.3:1080", func(match RoutingMatch) bool {
+		return match.Policy == "direct"
+	}) {
+		t.Error("10.1.2.3:1080 должен матчить geoip (порт срезается)")
+	}
+	// IPv6 с портом: [адрес]:порт.
+	if !m.MatchRules(ip, "[10.0.0.1]:443", func(RoutingMatch) bool { return true }) {
+		t.Error("[10.0.0.1]:443 должен матчить geoip после среза порта")
+	}
+	if m.MatchRules(ip, "[2001:db8::1]:443", func(RoutingMatch) bool { return true }) {
+		t.Error("[2001:db8::1]:443 не должен матчить PRIVATE")
+	}
+}
+
 // ── parseRule / validateRule / validPolicy ────────────────────────────────────
 
 func TestParseRule(t *testing.T) {

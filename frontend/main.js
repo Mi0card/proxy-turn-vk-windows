@@ -6,12 +6,11 @@ const state = {
   tunnelRunning:  false,
   tunnelPaused:   false,
   socksRunning:   false,
-  logEntries:     [],   // [{ts, msg, lv}] — туннель
-  socksEntries:   [],   // [{ts, msg, lv}] — SOCKS5
-  routingEntries: [],   // [{ts, msg, lv}] — маршрутизация
+  logEntries:     [],   // [{ts, msg, lv}] — общий (туннель + маршрутизация + прокси)
+  connEntries:    [],   // [{ts, msg, lv}] — подключения (→ host:port)
   rulesetGroups:  { geosite: [], geoip: [] }, // [{ts, msg, lv}] — маршрутизация
   logFilter:      'all',
-  activeLogTab:   'tunnel',
+  activeLogTab:   'general',
   lastPingMs:      null,
   activeTab:       'connect',
   activeWorkers:  0,
@@ -112,7 +111,6 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('socks:status', onSocksStatus);
   window.runtime.EventsOn('socks:stats', onSocksStats);
   window.runtime.EventsOn('socks:log', onSocksLog);
-  window.runtime.EventsOn('routing:log', onRoutingLog);
   window.runtime.EventsOn('tunnel:stats', onTunnelStats);
   window.runtime.EventsOn('tunnel:ping',  onTunnelPing);
   window.runtime.EventsOn('deploy:log', onDeployLog);
@@ -201,9 +199,9 @@ function switchTab(name) {
 
   // При переходе на логи — прокручиваем в конец
   if (name === 'logs') {
-    const box = state.activeLogTab === 'socks'   ? document.getElementById('socks-log-box')
-      : state.activeLogTab === 'routing' ? document.getElementById('routing-log-box')
-      : document.getElementById('log-box');
+    const box = state.activeLogTab === 'conn'
+      ? document.getElementById('conn-log-box')
+      : document.getElementById('general-log-box');
     if (box) box.scrollTop = box.scrollHeight;
   }
   // При открытии роутинга — загружаем правила
@@ -493,7 +491,7 @@ async function proxyStart() {
   try {
     const err = await window.go.main.App.ProxyStart(host, s5port, httpPort, u, pw, ua);
     if (err) {
-      socksLog('Ошибка запуска: ' + err, 'error');
+      log('Ошибка запуска: ' + err, 'error');
       showToast('Прокси: ' + err);
       btn.disabled = false;
       return;
@@ -510,7 +508,7 @@ async function proxyStart() {
 
     await saveConfig();
   } catch (e) {
-    socksLog('Ошибка запуска: ' + e, 'error');
+    log('Ошибка запуска: ' + e, 'error');
     showToast('Прокси: ' + e);
     btn.disabled = false;
   } finally {
@@ -526,7 +524,7 @@ async function proxyStop() {
   try {
     await window.go.main.App.SocksStop();
   } catch (e) {
-    socksLog('Ошибка остановки: ' + e, 'error');
+    log('Ошибка остановки: ' + e, 'error');
     showToast('Не удалось остановить прокси: ' + e);
   } finally {
     document.getElementById('btn-pstart').disabled = false;
@@ -543,7 +541,7 @@ async function onSysProxyToggle() {
     if (cb.checked) {
       const sErr = await window.go.main.App.SystemProxyEnable();
       if (sErr) {
-        socksLog('System proxy: ' + sErr, 'error');
+        log('System proxy: ' + sErr, 'error');
         showToast('Системный прокси: ' + sErr);
         cb.checked = false;
       }
@@ -551,7 +549,7 @@ async function onSysProxyToggle() {
       await window.go.main.App.SystemProxyDisable();
     }
   } catch (e) {
-    socksLog('System proxy: ' + e, 'error');
+    log('System proxy: ' + e, 'error');
     showToast('Системный прокси: ' + e);
     cb.checked = false;
   }
@@ -565,21 +563,22 @@ function onSysProxyStatus(on) {
   if (cb) cb.checked = on;
 }
 
-// Отдельный лог для SOCKS5 соединений
-function socksLog(msg, lv = 'info') {
+// Отдельный лог для подключений прокси (→ host:port)
+function connLog(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const entry = {ts, msg, lv};
-  state.socksEntries.push(entry);
+  state.connEntries.push(entry);
   // Всегда добавляем в DOM — бокс может быть скрыт но данные актуальны
-  appendSocksLine(entry);
+  appendConnLine(entry);
 }
 
-function appendSocksLine({ts, msg, lv}) {
-  const box = document.getElementById('socks-log-box');
+function appendConnLine({ts, msg, lv}) {
+  const box = document.getElementById('conn-log-box');
   const line = document.createElement('div');
   line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
+  const stick = isNearBottom(box);
   box.appendChild(line);
-  if (state.activeTab === 'logs' && state.activeLogTab === 'socks') {
+  if (stick && state.activeTab === 'logs' && state.activeLogTab === 'conn') {
     box.scrollTop = box.scrollHeight;
   }
 }
@@ -649,34 +648,16 @@ function onSocksStats(stats) {
   }
 }
 
-// Получаем отдельные события лога SOCKS5 соединений
+// Получаем события подключений прокси
 function onSocksLog(entry) {
-  socksLog(entry.msg, entry.lv);
+  connLog(entry.msg, entry.lv);
 }
 
 // ── Лог маршрутизации (ruleset) ───────────────────────────────────────────
 
-// Отдельный лог для маршрутизации (правила, скачивание/обновление дата-файлов).
+// Маршрутизация пишется в общий лог (вкладка «Общий»).
 function routingLog(msg, lv = 'info') {
-  const ts = new Date().toLocaleTimeString('ru', {hour12: false});
-  const entry = {ts, msg, lv};
-  state.routingEntries.push(entry);
-  appendRoutingLine(entry);
-}
-
-function appendRoutingLine({ts, msg, lv}) {
-  const box = document.getElementById('routing-log-box');
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
-  box.appendChild(line);
-  if (state.activeTab === 'logs' && state.activeLogTab === 'routing') {
-    box.scrollTop = box.scrollHeight;
-  }
-}
-
-// Получаем отдельные события лога маршрутизации
-function onRoutingLog(entry) {
-  routingLog(entry.msg, entry.lv);
+  log(msg, lv);
 }
 
 function toggleAuth() {
@@ -1280,6 +1261,12 @@ async function wgCopy() {
 
 // ── Лог ───────────────────────────────────────────────────────────────────────
 
+// Находится ли скроллбокс у нижней границы (порог ~40px). Если юзер отмотал
+// лог назад — автопрокрутка не срабатывает, чтобы не мешать просмотру.
+function isNearBottom(box) {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+}
+
 function log(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const entry = {ts, msg, lv};
@@ -1295,31 +1282,32 @@ function onLog(entry) {
 }
 
 function appendLogLine({ts, msg, lv}) {
-  const box = document.getElementById('log-box');
+  const box = document.getElementById('general-log-box');
   const line = document.createElement('div');
   line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
+  const stick = isNearBottom(box);
   box.appendChild(line);
-  // Автопрокрутка только когда вкладка логов активна
-  if (state.activeTab === 'logs' && state.activeLogTab === 'tunnel') {
+  // Автопрокрутка только когда вкладка логов активна и юзер был внизу
+  if (stick && state.activeTab === 'logs' && state.activeLogTab === 'general') {
     box.scrollTop = box.scrollHeight;
   }
 }
 
 function setFilter(f) {
   state.logFilter = f;
-  const box = document.getElementById('log-box');
+  const box = document.getElementById('general-log-box');
   box.innerHTML = '';
   state.logEntries.forEach(e => {
     if (f === 'all' || e.lv === f || (f === 'warn' && (e.lv === 'warn' || e.lv === 'error'))) {
       appendLogLine(e);
     }
   });
+  box.scrollTop = box.scrollHeight;
 }
 
 async function saveLog() {
-  const entries = state.activeLogTab === 'tunnel' ? state.logEntries
-    : state.activeLogTab === 'socks'   ? state.socksEntries
-    : state.routingEntries;
+  const entries = state.activeLogTab === 'general' ? state.logEntries
+    : state.connEntries;
   const lines = entries
     .map(e => `[${e.ts}] [${e.lv.toUpperCase().padEnd(7)}] ${e.msg}`)
     .join('\n');
@@ -1328,15 +1316,12 @@ async function saveLog() {
 }
 
 function clearLog() {
-  if (state.activeLogTab === 'tunnel') {
+  if (state.activeLogTab === 'general') {
     state.logEntries = [];
-    document.getElementById('log-box').innerHTML = '';
-  } else if (state.activeLogTab === 'socks') {
-    state.socksEntries = [];
-    document.getElementById('socks-log-box').innerHTML = '';
+    document.getElementById('general-log-box').innerHTML = '';
   } else {
-    state.routingEntries = [];
-    document.getElementById('routing-log-box').innerHTML = '';
+    state.connEntries = [];
+    document.getElementById('conn-log-box').innerHTML = '';
   }
 }
 
@@ -1447,8 +1432,9 @@ function deployLog(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const line = document.createElement('div');
   line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
+  const stick = isNearBottom(box);
   box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+  if (stick) box.scrollTop = box.scrollHeight;
 }
 
 function onDeployLog(entry) {
@@ -1456,8 +1442,9 @@ function onDeployLog(entry) {
   if (!box) return;
   const line = document.createElement('div');
   line.innerHTML = `<span class="log-ts">[${entry.ts}]</span> <span class="log-${entry.lv}">${escHtml(entry.msg)}</span>`;
+  const stick = isNearBottom(box);
   box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+  if (stick) box.scrollTop = box.scrollHeight;
 }
 
 function clearDeployLog() {
@@ -1470,16 +1457,14 @@ function clearDeployLog() {
 function switchLogTab(tab) {
   state.activeLogTab = tab;
 
-  document.getElementById('ltab-tunnel').classList.toggle('active', tab === 'tunnel');
-  document.getElementById('ltab-socks').classList.toggle('active',  tab === 'socks');
-  document.getElementById('ltab-routing').classList.toggle('active', tab === 'routing');
+  document.getElementById('ltab-general').classList.toggle('active', tab === 'general');
+  document.getElementById('ltab-conn').classList.toggle('active',    tab === 'conn');
 
-  document.getElementById('log-box').style.display        = tab === 'tunnel'   ? '' : 'none';
-  document.getElementById('socks-log-box').style.display  = tab === 'socks'    ? '' : 'none';
-  document.getElementById('routing-log-box').style.display = tab === 'routing' ? '' : 'none';
+  document.getElementById('general-log-box').style.display = tab === 'general' ? '' : 'none';
+  document.getElementById('conn-log-box').style.display    = tab === 'conn'    ? '' : 'none';
 
-  // Фильтр показываем только для туннеля
-  document.getElementById('log-filter-row').style.display = tab === 'tunnel' ? '' : 'none';
+  // Фильтр показываем только для общего лога
+  document.getElementById('log-filter-row').style.display = tab === 'general' ? '' : 'none';
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

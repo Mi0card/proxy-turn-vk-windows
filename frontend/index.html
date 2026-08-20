@@ -483,9 +483,8 @@ PersistentKeepalive = 25
         <div class="log-panel-inner">
           <div class="log-header">
             <div class="log-tabs">
-              <button class="log-tab active" id="ltab-tunnel" onclick="switchLogTab('tunnel')" aria-label="Переключить на лог туннеля">Туннель</button>
-              <button class="log-tab" id="ltab-socks" onclick="switchLogTab('socks')" aria-label="Переключить на лог прокси">Прокси</button>
-              <button class="log-tab" id="ltab-routing" onclick="switchLogTab('routing')" aria-label="Переключить на лог маршрутизации">Маршрутизация</button>
+              <button class="log-tab active" id="ltab-general" onclick="switchLogTab('general')" aria-label="Переключить на общий лог">Общий</button>
+              <button class="log-tab" id="ltab-conn" onclick="switchLogTab('conn')" aria-label="Переключить на лог подключений">Подключения</button>
             </div>
             <div class="log-filters" id="log-filter-row">
               <span class="filter-label">Фильтр:</span>
@@ -501,9 +500,8 @@ PersistentKeepalive = 25
               <button class="btn btn-sm" onclick="clearLog()" aria-label="Очистить лог">Очистить</button>
             </div>
           </div>
-          <div id="log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля."></div>
-          <div id="socks-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события прокси."></div>
-          <div id="routing-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события маршрутизации."></div>
+          <div id="general-log-box" class="log-box-full" data-empty-text="Лог пуст — здесь появятся события туннеля, маршрутизации и прокси."></div>
+          <div id="conn-log-box" class="log-box-full" style="display:none" data-empty-text="Лог пуст — здесь появятся события подключений."></div>
         </div>
       </section>
 
