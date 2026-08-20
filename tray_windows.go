@@ -242,6 +242,13 @@ func trayGetApp() *App {
 	return trayApp
 }
 
+// trayAvailable — создана ли иконка трея (скрытие окна имеет смысл только тогда).
+func trayAvailable() bool {
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	return trayActive
+}
+
 // ── Окно и message loop ──────────────────────────────────────────────────────
 
 func trayWndProc(hwnd syscall.Handle, m uint32, wParam, lParam uintptr) uintptr {

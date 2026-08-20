@@ -39,10 +39,10 @@ func trayInit(a *App) {
 		item := appkit.StatusBar_SystemStatusBar().StatusItemWithLength(appkit.VariableStatusItemLength)
 		objc.Retain(&item)
 
-		// Иконка из embedded PNG (build/windows/icon.ico). NSImage умеет
-		// PNG напрямую; SetTemplate(true) включает автоматический
-		// перекрас под светлую/тёмную строку меню.
-		if png, err := trayIconPNG(); err == nil {
+		// Иконка: прозрачная белая молния (build/tray_icon_mac.png).
+		// SetTemplate(true) включает автоматический перекрас под светлую/
+		// тёмную строку меню — цвет не важен, используется alpha-канал.
+		if png, err := trayIconMacPNG(); err == nil {
 			img := appkit.NewImageWithData(png)
 			img.SetTemplate(true)
 			item.Button().SetImage(img)
@@ -81,6 +81,13 @@ func trayGetApp() *App {
 	return trayApp
 }
 
+// trayAvailable — создана ли иконка в меню-баре.
+func trayAvailable() bool {
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	return trayInitialized
+}
+
 // trayRemove убирает иконку из меню-бара. Вызывается из shutdown.
 func trayRemove(a *App) {
 	trayMu.Lock()
@@ -110,7 +117,7 @@ func trayUpdateStatus(a *App) {
 	}
 	dispatch.MainQueue().DispatchAsync(func() {
 		trayMu.Lock()
-		if trayStatusMenuItem.Ptr() != 0 {
+		if trayStatusMenuItem.Ptr() != nil {
 			text := "WinDTT"
 			if trayApp != nil {
 				text = trayApp.trayStatusText()

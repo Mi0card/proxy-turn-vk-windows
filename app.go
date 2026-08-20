@@ -51,6 +51,7 @@ type Config struct {
 	RulesViaTunnel bool            `json:"rules_via_tunnel"`
 	RoutingDefault string          `json:"routing_default"`
 	MinimizeToTray bool            `json:"minimize_to_tray"`
+	TrayOnMinimize bool            `json:"tray_on_minimize"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -116,6 +117,9 @@ type App struct {
 
 	// Видимость окна (для трея): true = окно показано.
 	windowVisible atomic.Bool
+
+	// Поллинг сворачивания окна → скрытие в трей (TrayOnMinimize).
+	minPollStop chan struct{}
 
 	// Капча: защита от открытия нескольких окон при повторных CAPTCHA_SOLVE
 	captchaOpen atomic.Bool
@@ -236,6 +240,10 @@ func (a *App) startup(ctx context.Context) {
 	a.windowVisible.Store(true)
 	trayInit(a)
 	trayUpdateStatus(a)
+
+	// Следим за сворачиванием окна — при включённой опции прячем в трей.
+	a.minPollStop = make(chan struct{})
+	go a.watchMinimize()
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
@@ -245,7 +253,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 
 	// Если в настройках включено сворачивание в трей — прячем окно без диалога.
-	if a.getCfg().MinimizeToTray {
+	if a.getCfg().MinimizeToTray && trayAvailable() {
 		a.hideWindowToTray()
 		return true
 	}
@@ -314,6 +322,28 @@ func (a *App) showWindowFromTray() {
 	trayUpdateStatus(a)
 }
 
+// watchMinimize следит за состоянием окна и прячет его в трей при
+// сворачивании, если включена опция TrayOnMinimize. Wails не эмитит событий
+// о сворачивании окна, поэтому используем поллинг runtime.WindowIsMinimised
+// (на Windows — IsIconic, на macOS — isMiniaturized).
+func (a *App) watchMinimize() {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	wasMin := false
+	for {
+		select {
+		case <-ticker.C:
+			min := runtime.WindowIsMinimised(a.ctx)
+			if min && !wasMin && a.windowVisible.Load() && a.getCfg().TrayOnMinimize && trayAvailable() {
+				a.hideWindowToTray()
+			}
+			wasMin = min
+		case <-a.minPollStop:
+			return
+		}
+	}
+}
+
 // quitApp останавливает сервисы и завершает приложение. Вызывается из трея
 // и из диалога закрытия. Guard через closeAllowed — второй вызов игнорируется.
 func (a *App) quitApp() {
@@ -379,6 +409,10 @@ func (a *App) trayStatusText() string {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.minPollStop != nil {
+		close(a.minPollStop)
+		a.minPollStop = nil
+	}
 	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
 	a.TunnelStop()

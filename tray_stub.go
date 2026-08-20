@@ -10,3 +10,4 @@ func trayRemove(a *App)       {}
 func trayUpdateStatus(a *App) {}
 func trayActivateApp()        {}
 func trayGetApp() *App        { return nil }
+func trayAvailable() bool     { return false }

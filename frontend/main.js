@@ -37,6 +37,7 @@ const TAB_META = {
   logs:    { title: 'Логи',         sub: 'События туннеля, прокси и маршрутизации' },
   wg:      { title: 'WireGuard',    sub: 'Конфигурация WireGuard' },
   deploy:  { title: 'Deploy',       sub: 'Установка wdtt-server на VPS' },
+  settings:{ title: 'Настройки',    sub: 'Поведение окна и системный трей' },
   help:    { title: 'Справка',      sub: 'Инструкции и флаги wdtt-client' },
 };
 
@@ -257,6 +258,8 @@ function loadConfig(cfg) {
   }
   const mtr = document.getElementById('minimize-tray');
   if (mtr && cfg.minimize_to_tray !== undefined) mtr.checked = !!cfg.minimize_to_tray;
+  const mtm = document.getElementById('minimize-tray-on-min');
+  if (mtm && cfg.tray_on_minimize !== undefined) mtm.checked = !!cfg.tray_on_minimize;
   toggleAuth();
 }
 
@@ -280,6 +283,7 @@ function collectConfig() {
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
     minimize_to_tray: document.getElementById('minimize-tray')?.checked || false,
+    tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }
