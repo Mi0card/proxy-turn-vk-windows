@@ -250,6 +250,9 @@ function loadConfig(cfg) {
   const rvt = document.getElementById('rr-via-tunnel');
   if (rvt && cfg.rules_via_tunnel !== undefined) rvt.checked = !!cfg.rules_via_tunnel;
 
+  const rdp = document.getElementById('rr-default-policy');
+  if (rdp) rdp.value = cfg.routing_default || 'proxy';
+
   // px_use_auth: undefined → оставляем HTML-дефолт (checked)
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
@@ -275,6 +278,7 @@ function collectConfig() {
     px_user:      getVal('px-user'),
     px_pass:      getVal('px-pass'),
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
+    routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }
@@ -830,7 +834,7 @@ async function saveRoutingRules() {
   const saved = document.getElementById('rules-saved');
   if (btn) { btn.disabled = true; setBtnLabel(btn, 'Сохраняю…'); }
   if (saved) saved.style.display = 'none';
-  const err = await window.go.main.App.SetRulesets(configs);
+  const err = await window.go.main.App.SetRulesets(configs, document.getElementById('rr-default-policy')?.value || 'proxy');
   if (err) {
     if (btn) { btn.disabled = false; setBtnLabel(btn, 'Сохранить'); }
     showToast('Маршрутизация: ' + err); routingLog('Маршрутизация: ' + err, 'error'); return;
@@ -1512,7 +1516,7 @@ WireGuard over VK TURN — туннель через звонки VK
   1. Вставьте wdtt:// ссылку → «Разобрать»
      Формат: wdtt://IP:PORT:WG_PORT:LISTEN:SECRET:HASH[,HASH2]
   2. Или заполните поля вручную:
-     VK хеш    — хеш(и) VK-звонка через запятую
+     VK хеш    — хеш(и) VK-звонка: «+» добавляет, видно 2, остальные скроллом
      VPS адрес — IP:PORT сервера (например 1.2.3.4:56000)
      Secret    — пароль туннеля
   3. Нажмите «▶ Подключить»
@@ -1556,6 +1560,8 @@ PROXY (SOCKS5 + HTTP)
     direct (напрямую в обход туннеля),
     proxy (через туннель).
   Правила применяются сверху вниз — первое совпадение.
+  Трафик без совпадения идёт по выбору «Трафик по умолчанию»
+  (вверху вкладки): proxy / direct / block.
   Кнопка «Обновить правила» скачивает geosite/geoip
   из runetfreedom/russia-v2ray-rules-dat.
 
@@ -1575,7 +1581,7 @@ WIREGUARD
   Используйте с официальным WireGuard клиентом.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ТОП-БАР
+ШАПКА
   Туннель 42ms — статус туннеля и пинг
   трафик 1.24 МБ       — суммарный трафик
   скорость 128 КБ/с    — текущая скорость
@@ -1587,7 +1593,7 @@ WIREGUARD
   -peer IP:PORT       адрес VPS
   -vk   HASH,...      хеш(и) VK-звонка
   -password SECRET    пароль туннеля
-  -n    24            потоков (кратно 12, макс 108)
+  -n    9             потоков (кратно 9, макс 108)
   -listen 127.0.0.1:9000
   -fingerprint chrome/safari/firefox/ios/android
   -captcha-mode auto/rjs/wv

@@ -49,6 +49,7 @@ type Config struct {
 	Theme       string          `json:"theme"`
 	Rulesets    []RulesetConfig `json:"rulesets"`
 	RulesViaTunnel bool         `json:"rules_via_tunnel"`
+	RoutingDefault string       `json:"routing_default"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -206,7 +207,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ruleset.SetViaTunnel(a.getCfg().RulesViaTunnel)
 	if a.proxy != nil {
 		a.proxy.SetRulesetManager(a.ruleset)
-		a.proxy.SetRulesets(a.getCfg().Rulesets)
+		a.applyRouting()
 	}
 	// Асинхронно подгружаем правила (из кеша или сети). Если настроены только
 	// встроенные правила (domain:/keyword:/...) или правил нет — скачивание не нужно,
@@ -1179,9 +1180,7 @@ type SocksStatsResult struct {
 
 func (a *App) ProxyStart(host, socks5Port, httpPort, user, pwd string, useAuth bool) string {
 	// Применяем текущие правила маршрутизации к прокси.
-	if a.proxy != nil {
-		a.proxy.SetRulesets(a.getCfg().Rulesets)
-	}
+	a.applyRouting()
 	if err := a.proxy.Start(host, socks5Port, httpPort, useAuth, user, pwd); err != nil {
 		return err.Error()
 	}
@@ -1220,9 +1219,22 @@ func (a *App) GetRulesets() []RulesetConfig {
 	return cfg.Rulesets
 }
 
-// SetRulesets сохраняет список правил (с валидацией) в конфиг.
-// Возвращает "" при успехе, иначе текст ошибки.
-func (a *App) SetRulesets(configs []RulesetConfig) string {
+// applyRouting применяет правила маршрутизации и политику по умолчанию к прокси.
+func (a *App) applyRouting() {
+	if a.proxy == nil {
+		return
+	}
+	cfg := a.getCfg()
+	a.proxy.SetRulesets(cfg.Rulesets)
+	a.proxy.SetDefaultPolicy(cfg.RoutingDefault)
+}
+
+// SetRulesets сохраняет список правил (с валидацией) и политику по умолчанию
+// в конфиг. Возвращает "" при успехе, иначе текст ошибки.
+func (a *App) SetRulesets(configs []RulesetConfig, defaultPolicy string) string {
+	if !validPolicy(defaultPolicy) {
+		defaultPolicy = PolicyProxy
+	}
 	filtered := make([]RulesetConfig, 0, len(configs))
 	for _, rc := range configs {
 		if rc.Rule == "" {
@@ -1243,8 +1255,12 @@ func (a *App) SetRulesets(configs []RulesetConfig) string {
 	}
 	a.cfgMu.Lock()
 	a.cfg.Rulesets = filtered
+	a.cfg.RoutingDefault = defaultPolicy
 	a.cfgMu.Unlock()
 	a.persistConfig()
+	if a.proxy != nil {
+		a.proxy.SetDefaultPolicy(defaultPolicy)
+	}
 	a.routingLog(fmt.Sprintf("Маршрутизация: сохранено %d правил.", len(filtered)), "info")
 	return ""
 }
@@ -1298,7 +1314,7 @@ func (a *App) UpdateRulesets() string {
 	}
 	// Применяем правила к работающему прокси.
 	if a.proxy != nil {
-		a.proxy.SetRulesets(a.getCfg().Rulesets)
+		a.applyRouting()
 		a.routingLog(fmt.Sprintf("Маршрутизация: применено %d правил к прокси.", len(a.getCfg().Rulesets)), "info")
 	}
 	a.routingLog("Маршрутизация: правила обновлены.", "success")
@@ -1323,7 +1339,7 @@ func (a *App) EnsureRulesetsLoaded() string {
 		}
 	}
 	if a.proxy != nil {
-		a.proxy.SetRulesets(configs)
+		a.applyRouting()
 	}
 	if n := len(configs); n > 0 {
 		a.routingLog(fmt.Sprintf("Маршрутизация: правила загружены, применено %d правил к прокси.", n), "info")

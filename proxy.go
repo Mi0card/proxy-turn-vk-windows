@@ -253,9 +253,10 @@ type ProxyServer struct {
 	statsFn  func(ProxyStats)
 
 	// Маршрутизация по правилам
-	rulesetMu  sync.RWMutex
-	rulesets   []RulesetConfig
-	rulesetMgr *RulesetManager
+	rulesetMu     sync.RWMutex
+	rulesets      []RulesetConfig
+	rulesetMgr    *RulesetManager
+	defaultPolicy string
 
 	active int32 // атомарный счётчик активных соединений
 	total  int32 // всего соединений за сессию
@@ -270,6 +271,23 @@ func (p *ProxyServer) SetRulesets(configs []RulesetConfig) {
 	p.rulesetMu.Lock()
 	defer p.rulesetMu.Unlock()
 	p.rulesets = append([]RulesetConfig(nil), configs...)
+}
+
+// SetDefaultPolicy задаёт политику для трафика, к которому не подошло ни одно правило.
+func (p *ProxyServer) SetDefaultPolicy(policy string) {
+	p.rulesetMu.Lock()
+	defer p.rulesetMu.Unlock()
+	p.defaultPolicy = policy
+}
+
+// getDefaultPolicy возвращает политику по умолчанию; пустая → proxy (старое поведение).
+func (p *ProxyServer) getDefaultPolicy() string {
+	p.rulesetMu.RLock()
+	defer p.rulesetMu.RUnlock()
+	if p.defaultPolicy == "" {
+		return PolicyProxy
+	}
+	return p.defaultPolicy
 }
 
 // SetRulesetManager задаёт менеджер правил (загруженные geosite/geoip).
@@ -300,20 +318,19 @@ type ruleResult struct {
 // route определяет политику маршрутизации для хоста.
 func (p *ProxyServer) route(host string) ruleResult {
 	m := p.getRulesetMgr()
-	if m == nil {
-		return ruleResult{}
-	}
 	configs := p.getRulesets()
-	if len(configs) == 0 {
-		return ruleResult{}
-	}
 	var res ruleResult
-	m.MatchRules(configs, host, func(match RoutingMatch) bool {
-		res.policy = match.Policy
-		res.rule = match.Rule
-		// Порядок правил = приоритет: останавливаемся на первом совпадении.
-		return true
-	})
+	if m != nil && len(configs) > 0 {
+		m.MatchRules(configs, host, func(match RoutingMatch) bool {
+			res.policy = match.Policy
+			res.rule = match.Rule
+			// Порядок правил = приоритет: останавливаемся на первом совпадении.
+			return true
+		})
+	}
+	if res.policy == "" {
+		res.policy = p.getDefaultPolicy()
+	}
 	return res
 }
 
