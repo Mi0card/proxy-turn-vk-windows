@@ -508,6 +508,10 @@ PersistentKeepalive = 25
       <!-- Справка -->
       <section id="tab-help" class="tab-panel hidden">
         <div class="card">
+          <label class="tray-option" title="При закрытии окна программа продолжит работать в системном трее">
+            <input type="checkbox" id="minimize-tray" onchange="saveConfig()">
+            <span>Сворачивать в трей вместо закрытия</span>
+          </label>
           <pre class="help-text" id="help-text"></pre>
         </div>
       </section>

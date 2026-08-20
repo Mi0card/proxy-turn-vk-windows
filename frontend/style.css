@@ -590,6 +590,18 @@ body.light .sel {
 }
 .rules-via-tunnel input[type="checkbox"] { margin: 0; accent-color: var(--accent); cursor: pointer; }
 
+.tray-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+}
+.tray-option input[type="checkbox"] { margin: 0; accent-color: var(--accent); cursor: pointer; }
+
 .rules-progress {
   display: flex;
   align-items: center;

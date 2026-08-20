@@ -255,6 +255,8 @@ function loadConfig(cfg) {
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
   }
+  const mtr = document.getElementById('minimize-tray');
+  if (mtr && cfg.minimize_to_tray !== undefined) mtr.checked = !!cfg.minimize_to_tray;
   toggleAuth();
 }
 
@@ -277,6 +279,7 @@ function collectConfig() {
     px_pass:      getVal('px-pass'),
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
+    minimize_to_tray: document.getElementById('minimize-tray')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }

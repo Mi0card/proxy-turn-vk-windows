@@ -26,30 +26,31 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.5.9"
+const AppVersion = "0.2.7.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type Config struct {
-	VK          string          `json:"vk"`
-	Srv         string          `json:"srv"`
-	Sec         string          `json:"sec"`
-	N           string          `json:"n"`
-	Listen      string          `json:"listen"`
-	CaptchaMode string          `json:"captcha_mode"`
-	ObfsMode    string          `json:"obfs_mode"`
-	Fingerprint string          `json:"fingerprint"`
-	DeviceID    string          `json:"device_id"`
-	PxHost      string          `json:"px_host"`
-	PxSocksPort string          `json:"px_socks_port"`
-	PxHttpPort  string          `json:"px_http_port"`
-	PxUseAuth   bool            `json:"px_use_auth"`
-	PxUser      string          `json:"px_user"`
-	PxPass      string          `json:"px_pass"`
-	Theme       string          `json:"theme"`
-	Rulesets    []RulesetConfig `json:"rulesets"`
-	RulesViaTunnel bool         `json:"rules_via_tunnel"`
-	RoutingDefault string       `json:"routing_default"`
+	VK             string          `json:"vk"`
+	Srv            string          `json:"srv"`
+	Sec            string          `json:"sec"`
+	N              string          `json:"n"`
+	Listen         string          `json:"listen"`
+	CaptchaMode    string          `json:"captcha_mode"`
+	ObfsMode       string          `json:"obfs_mode"`
+	Fingerprint    string          `json:"fingerprint"`
+	DeviceID       string          `json:"device_id"`
+	PxHost         string          `json:"px_host"`
+	PxSocksPort    string          `json:"px_socks_port"`
+	PxHttpPort     string          `json:"px_http_port"`
+	PxUseAuth      bool            `json:"px_use_auth"`
+	PxUser         string          `json:"px_user"`
+	PxPass         string          `json:"px_pass"`
+	Theme          string          `json:"theme"`
+	Rulesets       []RulesetConfig `json:"rulesets"`
+	RulesViaTunnel bool            `json:"rules_via_tunnel"`
+	RoutingDefault string          `json:"routing_default"`
+	MinimizeToTray bool            `json:"minimize_to_tray"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -112,6 +113,9 @@ type App struct {
 
 	// Закрытие
 	closeAllowed atomic.Bool
+
+	// Видимость окна (для трея): true = окно показано.
+	windowVisible atomic.Bool
 
 	// Капча: защита от открытия нескольких окон при повторных CAPTCHA_SOLVE
 	captchaOpen atomic.Bool
@@ -227,12 +231,23 @@ func (a *App) startup(ctx context.Context) {
 		a.clearSysProxyBackup()
 		a.log("Обнаружен и восстановлен системный прокси от прошлого сеанса.", "warn")
 	}
+
+	// Трей: иконка создаётся на всех поддерживаемых платформах (Windows, macOS).
+	a.windowVisible.Store(true)
+	trayInit(a)
+	trayUpdateStatus(a)
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
 func (a *App) beforeClose(ctx context.Context) bool {
 	if a.closeAllowed.Load() {
 		return false
+	}
+
+	// Если в настройках включено сворачивание в трей — прячем окно без диалога.
+	if a.getCfg().MinimizeToTray {
+		a.hideWindowToTray()
+		return true
 	}
 
 	a.tunnelMu.Lock()
@@ -260,60 +275,111 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		Type:          runtime.QuestionDialog,
 		Title:         "WinDTT",
 		Message:       msg,
-		Buttons:       []string{"Закрыть", "Отмена"},
+		Buttons:       []string{"В трей", "Закрыть", "Отмена"},
 		DefaultButton: "Закрыть",
 		CancelButton:  "Отмена",
 	})
 
-	cancelled := btn == "Отмена" || btn == "Cancel" || btn == "No" || btn == ""
-	if cancelled {
+	switch btn {
+	case "В трей", "Tray":
+		// Сворачиваем в трей, сервисы продолжают работать.
+		a.hideWindowToTray()
+		return true
+	case "Отмена", "Cancel", "No", "":
+		return true
+	default:
+		// «Закрыть» — останавливаем сервисы и выходим.
+		a.quitApp()
 		return true
 	}
+}
 
-	// Останавливаем сервисы если запущены
-	if tunnelActive || socksActive {
-		go func() {
-			// Системный прокси снимаем первым — восстановить настройки до выхода.
-			if a.sysProxyOn.Load() {
-				a.SystemProxyDisable()
-			}
-			if tunnelActive {
-				a.log("Останавливаю туннель...", "warn")
-				a.tunnelSend("STOP")
-				for i := 0; i < 40; i++ {
-					time.Sleep(100 * time.Millisecond)
-					a.tunnelMu.Lock()
-					running := a.tunnelRunning
-					a.tunnelMu.Unlock()
-					if !running {
-						break
-					}
-				}
+// hideWindowToTray прячет главное окно (сервисы продолжают работать).
+func (a *App) hideWindowToTray() {
+	a.windowVisible.Store(false)
+	if a.ctx != nil {
+		runtime.WindowHide(a.ctx)
+	}
+	trayUpdateStatus(a)
+}
+
+// showWindowFromTray разворачивает и показывает главное окно.
+func (a *App) showWindowFromTray() {
+	a.windowVisible.Store(true)
+	trayActivateApp()
+	if a.ctx != nil {
+		runtime.WindowUnminimise(a.ctx)
+		runtime.WindowShow(a.ctx)
+	}
+	trayUpdateStatus(a)
+}
+
+// quitApp останавливает сервисы и завершает приложение. Вызывается из трея
+// и из диалога закрытия. Guard через closeAllowed — второй вызов игнорируется.
+func (a *App) quitApp() {
+	if !a.closeAllowed.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer func() { recover() }()
+		// Системный прокси снимаем первым — восстановить настройки до выхода.
+		if a.sysProxyOn.Load() {
+			a.SystemProxyDisable()
+		}
+		a.tunnelMu.Lock()
+		tunnelActive := a.tunnelRunning
+		a.tunnelMu.Unlock()
+		if tunnelActive {
+			a.log("Останавливаю туннель...", "warn")
+			a.tunnelSend("STOP")
+			for i := 0; i < 40; i++ {
+				time.Sleep(100 * time.Millisecond)
 				a.tunnelMu.Lock()
-				proc := a.tunnelProc
-				still := a.tunnelRunning
+				running := a.tunnelRunning
 				a.tunnelMu.Unlock()
-				if still && proc != nil {
-					proc.Process.Kill()
+				if !running {
+					break
 				}
-				a.log("Туннель остановлен.", "warn")
 			}
-			if socksActive {
-				a.log("Останавливаю локальный прокси...", "warn")
-				a.SocksStop()
-				a.log("Локальный прокси остановлен.", "warn")
+			a.tunnelMu.Lock()
+			proc := a.tunnelProc
+			still := a.tunnelRunning
+			a.tunnelMu.Unlock()
+			if still && proc != nil {
+				proc.Process.Kill()
 			}
-			a.closeAllowed.Store(true)
-			runtime.Quit(ctx)
-		}()
-		return true
-	}
+			a.log("Туннель остановлен.", "warn")
+		}
+		if a.proxy.Running() {
+			a.log("Останавливаю локальный прокси...", "warn")
+			a.SocksStop()
+			a.log("Локальный прокси остановлен.", "warn")
+		}
+		if a.ctx != nil {
+			runtime.Quit(a.ctx)
+		}
+	}()
+}
 
-	// Ничего не запущено — закрываем сразу
-	return false
+// trayStatusText формирует строку статуса для меню трея.
+func (a *App) trayStatusText() string {
+	a.tunnelMu.Lock()
+	running := a.tunnelRunning
+	paused := a.tunnelPaused
+	workers := a.activeWorkers
+	a.tunnelMu.Unlock()
+	switch {
+	case paused:
+		return "Туннель: пауза"
+	case running:
+		return fmt.Sprintf("Туннель: активен (%d воркеров)", workers)
+	default:
+		return "Туннель: выключен"
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
 	a.TunnelStop()
 	StopWGTunnel()
@@ -670,6 +736,7 @@ func (a *App) TunnelStart(
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": false,
 	})
+	trayUpdateStatus(a)
 
 	// Читаем оба потока; финализируем только после того, как оба пайпа дочитаны
 	// до EOF (требование os/exec — нельзя звать Wait() во время чтения пайпов).
@@ -742,6 +809,7 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 				total := a.totalWorkers
 				a.tunnelMu.Unlock()
 				runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: n, Total: total})
+				trayUpdateStatus(a)
 			}
 			// Парсим трафик и считаем скорость
 			if m := reTraffic.FindStringSubmatch(line); m != nil {
@@ -829,6 +897,7 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 				total := a.totalWorkers
 				a.tunnelMu.Unlock()
 				runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: n, Total: total})
+				trayUpdateStatus(a)
 			}
 		}
 
@@ -927,6 +996,7 @@ func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
 		"running": false, "paused": false,
 	})
 	runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: 0, Total: totalWorkers})
+	trayUpdateStatus(a)
 }
 
 func (a *App) tunnelSend(cmd string) {
@@ -1144,6 +1214,7 @@ func (a *App) TunnelPause() {
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": true,
 	})
+	trayUpdateStatus(a)
 }
 
 func (a *App) TunnelResume() {
@@ -1154,6 +1225,7 @@ func (a *App) TunnelResume() {
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": false,
 	})
+	trayUpdateStatus(a)
 }
 
 func (a *App) TunnelStop() {
@@ -1217,12 +1289,14 @@ func (a *App) ProxyStart(host, socks5Port, httpPort, user, pwd string, useAuth b
 		return err.Error()
 	}
 	runtime.EventsEmit(a.ctx, "socks:status", true)
+	trayUpdateStatus(a)
 	return ""
 }
 
 func (a *App) SocksStop() {
 	a.proxy.Stop()
 	runtime.EventsEmit(a.ctx, "socks:status", false)
+	trayUpdateStatus(a)
 }
 
 func (a *App) SocksStatus() bool {
