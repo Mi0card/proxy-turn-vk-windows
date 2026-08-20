@@ -131,16 +131,15 @@ window.addEventListener('load', async () => {
     if (socksOn) onSocksStatus(true);
   } catch (e) { /* SocksStatus недоступен — оставляем дефолт */ }
 
-  // Статус бинарника
+  // Статус бинарника — показываем только предупреждение, если он не найден.
   const exeExists = await window.go.main.App.GetClientExeExists();
-  const exePath   = await window.go.main.App.GetClientExePath();
   const binEl = document.getElementById('bin-status');
-  if (exeExists) {
-    binEl.textContent = '✔  ' + exePath;
-    binEl.className = 'bin-status ok';
-  } else {
+  if (!exeExists) {
     binEl.textContent = '⚠  wdtt-client.exe не найден';
     binEl.className = 'bin-status err';
+  } else {
+    binEl.textContent = '';
+    binEl.className = 'bin-status';
   }
 
   // Справка

@@ -109,9 +109,10 @@
         <div class="card">
           <div class="card-title">Параметры подключения</div>
           <div class="fields">
-            <div class="field-row field-row--top">
-              <label class="label--top">VK хеш <span class="flag">(-vk)</span></label>
-              <div id="vk-list" class="vk-list">
+            <div class="field-row">
+              <label>VK хеш <span class="flag">(-vk)</span></label>
+              <div class="field-inp">
+                <div id="vk-list" class="vk-list">
                 <div class="vk-hash-row">
                   <input type="text" class="inp vk-hash" placeholder="e5rA_78w7leYpoKiqtDb...">
                   <button class="icon-btn" onclick="pasteVkHash(this)" title="Вставить" aria-label="Вставить хеш из буфера обмена">
@@ -122,9 +123,10 @@
                   </button>
                 </div>
               </div>
-              <button class="icon-btn btn-add-hash" onclick="addVkHash()" title="Добавить хеш" aria-label="Добавить хеш">
-                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-              </button>
+                <button class="icon-btn btn-add-hash" onclick="addVkHash()" title="Добавить хеш" aria-label="Добавить хеш">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
+              </div>
             </div>
             <div class="fields--grid">
             <div class="field-row">
@@ -228,8 +230,10 @@
           <div class="fields">
             <div class="field-row">
               <label>Хост</label>
-              <input id="px-host" type="text" class="inp inp-md" value="127.0.0.1">
-              <span class="hint">0.0.0.0 — доступен в сети</span>
+              <div class="field-inp">
+                <input id="px-host" type="text" class="inp inp-md" value="127.0.0.1">
+                <span class="hint">0.0.0.0 — доступен в сети</span>
+              </div>
             </div>
             <div class="field-row">
               <label>SOCKS5 порт</label>
@@ -252,11 +256,13 @@
             </div>
             <div class="field-row">
               <label>Пароль</label>
-              <input id="px-pass" type="password" class="inp inp-md">
-              <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
-              <button class="icon-btn" title="Сгенерировать" aria-label="Сгенерировать пароль" onclick="genPass()">
-                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
-              </button>
+              <div class="field-inp">
+                <input id="px-pass" type="password" class="inp inp-md">
+                <label class="chk-label"><input type="checkbox" onchange="togglePass('px-pass',this)"> показать</label>
+                <button class="icon-btn" title="Сгенерировать" aria-label="Сгенерировать пароль" onclick="genPass()">
+                  <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -373,10 +379,12 @@
               <div class="fields">
                 <div class="field-row">
                   <label>Пароль туннеля</label>
-                  <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
-                  <button class="icon-btn" onclick="genDeployPass()" title="Сгенерировать" aria-label="Сгенерировать пароль туннеля">
-                    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
-                  </button>
+                  <div class="field-inp">
+                    <input id="d-tunnel-pwd" type="text" class="inp inp-md" placeholder="обязателен при первом деплое">
+                    <button class="icon-btn" onclick="genDeployPass()" title="Сгенерировать" aria-label="Сгенерировать пароль туннеля">
+                      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M8 16h.01M16 16h.01M12 12h.01"/></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
