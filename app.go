@@ -770,7 +770,6 @@ func (a *App) TunnelStart(
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": false,
 	})
-	trayUpdateStatus(a)
 
 	// Читаем оба потока; финализируем только после того, как оба пайпа дочитаны
 	// до EOF (требование os/exec — нельзя звать Wait() во время чтения пайпов).
