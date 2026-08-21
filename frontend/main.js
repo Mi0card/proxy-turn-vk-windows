@@ -25,6 +25,8 @@ const ICO = {
   trash:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
   up:      '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>',
   down:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  first:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6M6 9l6 6 6-6"/></svg>',
+  last:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6M18 15-6-6-6 6"/></svg>',
   moon:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
   sun:     '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
 };
@@ -744,8 +746,10 @@ function renderRoutingList() {
         <option value="direct" ${rs.policy === 'direct' ? 'selected' : ''}>direct</option>
         <option value="block"  ${rs.policy === 'block'  ? 'selected' : ''}>block</option>
       </select>
+      <button class="icon-btn rr-first" data-i="${i}" title="В начало">${ICO.first}</button>
       <button class="icon-btn rr-up"   data-i="${i}" title="Вверх">${ICO.up}</button>
       <button class="icon-btn rr-down" data-i="${i}" title="Вниз">${ICO.down}</button>
+      <button class="icon-btn rr-last" data-i="${i}" title="В конец">${ICO.last}</button>
       <button class="icon-btn rr-del"  data-i="${i}" title="Удалить">${ICO.close}</button>
     </div>
   `).join('');
@@ -756,6 +760,12 @@ function renderRoutingList() {
   });
   container.querySelectorAll('.rr-policy').forEach(el => {
     el.addEventListener('change', () => { const i = +el.dataset.i; if (routingDraft[i]) routingDraft[i].policy = el.value; });
+  });
+  container.querySelectorAll('.rr-first').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i > 0) { const [t] = routingDraft.splice(i, 1); routingDraft.unshift(t); renderRoutingList(); } });
+  });
+  container.querySelectorAll('.rr-last').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i < routingDraft.length - 1) { const [t] = routingDraft.splice(i, 1); routingDraft.push(t); renderRoutingList(); } });
   });
   container.querySelectorAll('.rr-up').forEach(el => {
     el.addEventListener('click', () => { const i = +el.dataset.i; if (i > 0) { const t = routingDraft[i-1]; routingDraft[i-1] = routingDraft[i]; routingDraft[i] = t; renderRoutingList(); } });
