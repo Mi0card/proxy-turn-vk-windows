@@ -522,6 +522,14 @@ PersistentKeepalive = 25
             <span>Сворачивать в трей при сворачивании окна</span>
           </label>
         </div>
+        <div class="card">
+          <h3 class="settings-title">Импорт / Экспорт</h3>
+          <p class="hint hint--spaced">Экспорт сохраняет все настройки в JSON-файл для резервной копии или переноса на другой компьютер. Импорт полностью заменяет текущую конфигурацию.</p>
+          <div class="btn-row">
+            <button id="btn-export-config" class="btn" onclick="exportConfig()">Экспорт</button>
+            <button id="btn-import-config" class="btn" onclick="importConfig()">Импорт</button>
+          </div>
+        </div>
       </section>
 
       <!-- Справка -->

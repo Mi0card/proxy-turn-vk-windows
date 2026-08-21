@@ -1226,6 +1226,37 @@ async function undeploy() {
   }
 }
 
+// ── Импорт / экспорт конфигурации ─────────────────────────────────────────────
+
+async function exportConfig() {
+  const content = await window.go.main.App.ExportConfig();
+  if (!content) { log('Не удалось сериализовать конфигурацию.', 'error'); return; }
+  const ok = await window.go.main.App.SaveConfigDialog(content);
+  if (ok) log('Конфигурация экспортирована.', 'success');
+}
+
+async function importConfig() {
+  const confirmed = await window.go.main.App.ConfirmDialog(
+    'Импорт конфигурации',
+    'Импорт полностью заменит текущую конфигурацию. Продолжить?'
+  );
+  if (!confirmed) { log('Импорт отменён.', 'warn'); return; }
+  const res = await window.go.main.App.ImportConfig();
+  if (!res.ok) {
+    log('Ошибка импорта: ' + (res.error || 'неизвестная'), 'error');
+    showToast('Не удалось импортировать конфигурацию');
+    return;
+  }
+  log('Конфигурация импортирована.', 'success');
+  await applyImportedConfig(res.config);
+}
+
+async function applyImportedConfig(cfg) {
+  if (cfg) loadConfig(cfg);
+  if (cfg && cfg.theme) applyTheme(cfg.theme);
+  loadRoutingTab();
+}
+
 // ── WireGuard ─────────────────────────────────────────────────────────────────
 
 function onWgConfig(conf) {

@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.7.0"
+const AppVersion = "0.2.7.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1869,6 +1869,77 @@ func (a *App) SaveFileDialog(content string) bool {
 		return false
 	}
 	return os.WriteFile(path, []byte(content), 0644) == nil
+}
+
+// ── Импорт / экспорт конфигурации ─────────────────────────────────────────────
+
+// ExportConfig возвращает текущую конфигурацию в виде JSON-строки
+// (pretty-printed, как в windtt_config.json).
+func (a *App) ExportConfig() string {
+	data, err := json.MarshalIndent(a.getCfg(), "", "  ")
+	if err != nil {
+		a.log("⚠ Не удалось сериализовать конфиг для экспорта: "+err.Error(), "warn")
+		return ""
+	}
+	return string(data)
+}
+
+// SaveConfigDialog сохраняет JSON-конфигурацию через системный диалог
+// (права 0600 — файл содержит секреты).
+func (a *App) SaveConfigDialog(content string) bool {
+	path, _ := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Экспорт конфигурации",
+		DefaultFilename: "windtt_config.json",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON", Pattern: "*.json"},
+		},
+	})
+	if path == "" {
+		return false
+	}
+	return os.WriteFile(path, []byte(content), 0600) == nil
+}
+
+// ImportResult — результат импорта конфигурации для фронтенда.
+type ImportResult struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error"`
+	Config Config `json:"config"`
+}
+
+// ImportConfig открывает диалог выбора JSON-файла, парсит его и заменяет
+// текущую конфигурацию. Текущий DeviceID сохраняется — он присваивается
+// сервером и вряд ли подходит из импортированного файла. После импорта
+// правила маршрутизации применяются к работающему прокси.
+func (a *App) ImportConfig() ImportResult {
+	path, _ := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Импорт конфигурации",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON", Pattern: "*.json"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+	if path == "" {
+		return ImportResult{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ImportResult{OK: false, Error: "Не удалось прочитать файл: "+err.Error()}
+	}
+	var imported Config
+	if err := json.Unmarshal(data, &imported); err != nil {
+		return ImportResult{OK: false, Error: "Некорректный JSON конфигурации: "+err.Error()}
+	}
+	a.cfgMu.Lock()
+	imported.DeviceID = a.cfg.DeviceID
+	a.cfg = imported
+	a.cfgMu.Unlock()
+	if err := a.persistConfig(); err != nil {
+		return ImportResult{OK: false, Error: err.Error()}
+	}
+	a.applyRouting()
+	a.routingLog("Конфигурация импортирована.", "info")
+	return ImportResult{OK: true, Config: a.getCfg()}
 }
 
 // ── Platform-specific ─────────────────────────────────────────────────────────
