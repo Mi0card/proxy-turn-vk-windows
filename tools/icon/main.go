@@ -8,7 +8,7 @@
 // Результат:
 //   - build/appicon.png         1024x1024, синий квадрат #2563eb + белая молния
 //   - build/windows/icon.ico    многокадровый PNG-ico (256/64/48/32/16)
-//   - build/tray_icon_mac.png   64x64, прозрачный фон + белая молния (template)
+//   - build/tray_icon_mac.png   36x36 (18pt @2x для Retina), прозрачный фон + белая молния (template)
 package main
 
 import (
@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("icon.ico: %v", err)
 	}
 
-	trayMac := renderIcon(64, false)
+	trayMac := renderIcon(36, false)
 	if err := os.WriteFile(filepath.Join(root, "build", "tray_icon_mac.png"), encodePNG(trayMac), 0o644); err != nil {
 		log.Fatalf("tray_icon_mac.png: %v", err)
 	}

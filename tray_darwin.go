@@ -7,6 +7,7 @@ import (
 
 	"github.com/progrium/darwinkit/dispatch"
 	"github.com/progrium/darwinkit/macos/appkit"
+	"github.com/progrium/darwinkit/macos/foundation"
 	"github.com/progrium/darwinkit/objc"
 )
 
@@ -40,10 +41,14 @@ func trayInit(a *App) {
 		objc.Retain(&item)
 
 		// Иконка: прозрачная белая молния (build/tray_icon_mac.png).
+		// PNG сгенерирован в 2x (36px = 18pt @2x для Retina). Без явного
+		// SetSize NSImage из initWithData: получил бы размер 36x36 точек и
+		// растянулся бы на весь меню-бар + выглядел мыльным на Retina.
 		// SetTemplate(true) включает автоматический перекрас под светлую/
 		// тёмную строку меню — цвет не важен, используется alpha-канал.
 		if png, err := trayIconMacPNG(); err == nil {
 			img := appkit.NewImageWithData(png)
+			img.SetSize(foundation.Size{Width: 18, Height: 18})
 			img.SetTemplate(true)
 			item.Button().SetImage(img)
 		}
