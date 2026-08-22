@@ -353,7 +353,7 @@ body.sidebar-collapsed .collapse-btn .ico { transform: rotate(180deg); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-#tab-logs.active, #tab-deploy.active {
+#tab-logs.active, #tab-deploy.active, #tab-routing.active {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -590,6 +590,26 @@ body.light .sel {
 }
 .rules-via-tunnel input[type="checkbox"] { margin: 0; accent-color: var(--accent); cursor: pointer; }
 
+.tray-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+}
+.tray-option input[type="checkbox"] { margin: 0; accent-color: var(--accent); cursor: pointer; }
+
+.settings-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--text-1);
+}
+
 .rules-progress {
   display: flex;
   align-items: center;
@@ -633,10 +653,12 @@ body.light .sel {
 
 /* Список правил */
 .ruleset-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
-  margin-bottom: 12px;
 }
 .ruleset-item {
   display: flex;

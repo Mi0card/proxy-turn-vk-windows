@@ -25,6 +25,8 @@ const ICO = {
   trash:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
   up:      '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>',
   down:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  first:   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14"/><path d="m18 13-6-6-6 6"/><path d="M12 7v14"/></svg>',
+  last:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21h14"/><path d="m6 11 6 6 6-6"/><path d="M12 3v14"/></svg>',
   moon:    '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
   sun:     '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
 };
@@ -37,6 +39,7 @@ const TAB_META = {
   logs:    { title: 'Логи',         sub: 'События туннеля, прокси и маршрутизации' },
   wg:      { title: 'WireGuard',    sub: 'Конфигурация WireGuard' },
   deploy:  { title: 'Deploy',       sub: 'Установка wdtt-server на VPS' },
+  settings:{ title: 'Настройки',    sub: 'Поведение окна и системный трей' },
   help:    { title: 'Справка',      sub: 'Инструкции и флаги wdtt-client' },
 };
 
@@ -255,6 +258,10 @@ function loadConfig(cfg) {
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
   }
+  const mtr = document.getElementById('minimize-tray');
+  if (mtr && cfg.minimize_to_tray !== undefined) mtr.checked = !!cfg.minimize_to_tray;
+  const mtm = document.getElementById('minimize-tray-on-min');
+  if (mtm && cfg.tray_on_minimize !== undefined) mtm.checked = !!cfg.tray_on_minimize;
   toggleAuth();
 }
 
@@ -277,6 +284,8 @@ function collectConfig() {
     px_pass:      getVal('px-pass'),
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
+    minimize_to_tray: document.getElementById('minimize-tray')?.checked || false,
+    tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }
@@ -737,8 +746,10 @@ function renderRoutingList() {
         <option value="direct" ${rs.policy === 'direct' ? 'selected' : ''}>direct</option>
         <option value="block"  ${rs.policy === 'block'  ? 'selected' : ''}>block</option>
       </select>
+      <button class="icon-btn rr-first" data-i="${i}" title="В начало">${ICO.first}</button>
       <button class="icon-btn rr-up"   data-i="${i}" title="Вверх">${ICO.up}</button>
       <button class="icon-btn rr-down" data-i="${i}" title="Вниз">${ICO.down}</button>
+      <button class="icon-btn rr-last" data-i="${i}" title="В конец">${ICO.last}</button>
       <button class="icon-btn rr-del"  data-i="${i}" title="Удалить">${ICO.close}</button>
     </div>
   `).join('');
@@ -749,6 +760,12 @@ function renderRoutingList() {
   });
   container.querySelectorAll('.rr-policy').forEach(el => {
     el.addEventListener('change', () => { const i = +el.dataset.i; if (routingDraft[i]) routingDraft[i].policy = el.value; });
+  });
+  container.querySelectorAll('.rr-first').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i > 0) { const [t] = routingDraft.splice(i, 1); routingDraft.unshift(t); renderRoutingList(); } });
+  });
+  container.querySelectorAll('.rr-last').forEach(el => {
+    el.addEventListener('click', () => { const i = +el.dataset.i; if (i < routingDraft.length - 1) { const [t] = routingDraft.splice(i, 1); routingDraft.push(t); renderRoutingList(); } });
   });
   container.querySelectorAll('.rr-up').forEach(el => {
     el.addEventListener('click', () => { const i = +el.dataset.i; if (i > 0) { const t = routingDraft[i-1]; routingDraft[i-1] = routingDraft[i]; routingDraft[i] = t; renderRoutingList(); } });
@@ -1219,6 +1236,37 @@ async function undeploy() {
   }
 }
 
+// ── Импорт / экспорт конфигурации ─────────────────────────────────────────────
+
+async function exportConfig() {
+  const content = await window.go.main.App.ExportConfig();
+  if (!content) { log('Не удалось сериализовать конфигурацию.', 'error'); return; }
+  const ok = await window.go.main.App.SaveConfigDialog(content);
+  if (ok) log('Конфигурация экспортирована.', 'success');
+}
+
+async function importConfig() {
+  const confirmed = await window.go.main.App.ConfirmDialog(
+    'Импорт конфигурации',
+    'Импорт полностью заменит текущую конфигурацию. Продолжить?'
+  );
+  if (!confirmed) { log('Импорт отменён.', 'warn'); return; }
+  const res = await window.go.main.App.ImportConfig();
+  if (!res.ok) {
+    log('Ошибка импорта: ' + (res.error || 'неизвестная'), 'error');
+    showToast('Не удалось импортировать конфигурацию');
+    return;
+  }
+  log('Конфигурация импортирована.', 'success');
+  await applyImportedConfig(res.config);
+}
+
+async function applyImportedConfig(cfg) {
+  if (cfg) loadConfig(cfg);
+  if (cfg && cfg.theme) applyTheme(cfg.theme);
+  loadRoutingTab();
+}
+
 // ── WireGuard ─────────────────────────────────────────────────────────────────
 
 function onWgConfig(conf) {
@@ -1491,35 +1539,25 @@ function escHtml(s) {
 }
 
 // ── Help text ─────────────────────────────────────────────────────────────────
-
 function helpText(ver) {
   return `WinDTT  v${ver}
 WireGuard over VK TURN — туннель через звонки VK
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ПОДКЛЮЧЕНИЕ
-  1. Вставьте wdtt:// ссылку → «Разобрать»
-     Формат: wdtt://IP:PORT:WG_PORT:LISTEN:SECRET:HASH[,HASH2]
-  2. Или заполните поля вручную:
-     VK хеш    — хеш(и) VK-звонка: «+» добавляет, видно 2, остальные скроллом
-     VPS адрес — IP:PORT сервера (например 1.2.3.4:56000)
-     Secret    — пароль туннеля
-  3. Нажмите «▶ Подключить»
-  4. После подключения конфиг WireGuard появится
-     на вкладке WireGuard — скопируйте в WG клиент
+  1. Вставьте wdtt:// ссылку → «Разобрать»,
+     либо заполните вручную: VK хеш, VPS адрес (IP:PORT), Secret.
+  2. Нажмите «▶ Подключить».
+  3. Конфиг WireGuard появится на вкладке WireGuard —
+     скопируйте его в WireGuard клиент.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PROXY (SOCKS5 + HTTP)
-  Запускается на вкладке Прокси.
-  Оба протокола стартуют одновременно.
-  После получения WireGuard конфига
-  трафик автоматически идёт через туннель.
-
-  SOCKS5: настройте в браузере как SOCKS5 прокси
-  HTTP:   настройте как HTTP/HTTPS прокси
-  
-  Firefox: Настройки → Сеть → Ручная настройка прокси
-  Chrome:  расширение Proxy SwitchyOmega
+ПРОКСИ (SOCKS5 + HTTP)
+  Запускается на вкладке Прокси, оба протокола одновременно.
+  После подключения трафик автоматически идёт через туннель.
+  Настройте браузер:
+    Firefox: Настройки → Сеть → Ручная настройка прокси
+    Chrome:  расширение Proxy SwitchyOmega
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 МАРШРУТИЗАЦИЯ (по правилам)
@@ -1562,25 +1600,14 @@ DEPLOY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WIREGUARD
   Конфиг загружается автоматически при подключении.
-  Кнопки: Открыть · Копировать · Скачать .conf
+  Кнопки: Открыть · Копировать · Скачать .conf.
   Используйте с официальным WireGuard клиентом.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ШАПКА
-  Туннель 42ms — статус туннеля и пинг
-  трафик 1.24 МБ       — суммарный трафик
-  скорость 128 КБ/с    — текущая скорость
-  12/24 воркеров       — активных/всего
-  Локальный прокси (3 соед.) — статус прокси
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ФЛАГИ wdtt-client.exe:
-  -peer IP:PORT       адрес VPS
-  -vk   HASH,...      хеш(и) VK-звонка
-  -password SECRET    пароль туннеля
-  -n    9             потоков (кратно 9, макс 108)
-  -listen 127.0.0.1:9000
-  -fingerprint chrome/safari/firefox/ios/android
-  -captcha-mode auto/rjs/wv
-  -obfs audio/video   тип маскировки трафика`;
+  Туннель 42ms — статус и пинг туннеля
+  трафик 1.24 МБ   — суммарный трафик
+  скорость 128 КБ/с — текущая скорость
+  12/24 воркеров    — активных/всего
+  Локальный прокси (3 соед.) — статус прокси`;
 }

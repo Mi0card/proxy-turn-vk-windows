@@ -26,30 +26,32 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.6.0"
+const AppVersion = "0.2.7.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type Config struct {
-	VK          string          `json:"vk"`
-	Srv         string          `json:"srv"`
-	Sec         string          `json:"sec"`
-	N           string          `json:"n"`
-	Listen      string          `json:"listen"`
-	CaptchaMode string          `json:"captcha_mode"`
-	ObfsMode    string          `json:"obfs_mode"`
-	Fingerprint string          `json:"fingerprint"`
-	DeviceID    string          `json:"device_id"`
-	PxHost      string          `json:"px_host"`
-	PxSocksPort string          `json:"px_socks_port"`
-	PxHttpPort  string          `json:"px_http_port"`
-	PxUseAuth   bool            `json:"px_use_auth"`
-	PxUser      string          `json:"px_user"`
-	PxPass      string          `json:"px_pass"`
-	Theme       string          `json:"theme"`
-	Rulesets    []RulesetConfig `json:"rulesets"`
-	RulesViaTunnel bool         `json:"rules_via_tunnel"`
-	RoutingDefault string       `json:"routing_default"`
+	VK             string          `json:"vk"`
+	Srv            string          `json:"srv"`
+	Sec            string          `json:"sec"`
+	N              string          `json:"n"`
+	Listen         string          `json:"listen"`
+	CaptchaMode    string          `json:"captcha_mode"`
+	ObfsMode       string          `json:"obfs_mode"`
+	Fingerprint    string          `json:"fingerprint"`
+	DeviceID       string          `json:"device_id"`
+	PxHost         string          `json:"px_host"`
+	PxSocksPort    string          `json:"px_socks_port"`
+	PxHttpPort     string          `json:"px_http_port"`
+	PxUseAuth      bool            `json:"px_use_auth"`
+	PxUser         string          `json:"px_user"`
+	PxPass         string          `json:"px_pass"`
+	Theme          string          `json:"theme"`
+	Rulesets       []RulesetConfig `json:"rulesets"`
+	RulesViaTunnel bool            `json:"rules_via_tunnel"`
+	RoutingDefault string          `json:"routing_default"`
+	MinimizeToTray bool            `json:"minimize_to_tray"`
+	TrayOnMinimize bool            `json:"tray_on_minimize"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -112,6 +114,12 @@ type App struct {
 
 	// Закрытие
 	closeAllowed atomic.Bool
+
+	// Видимость окна (для трея): true = окно показано.
+	windowVisible atomic.Bool
+
+	// Поллинг сворачивания окна → скрытие в трей (TrayOnMinimize).
+	minPollStop chan struct{}
 
 	// Капча: защита от открытия нескольких окон при повторных CAPTCHA_SOLVE
 	captchaOpen atomic.Bool
@@ -227,12 +235,27 @@ func (a *App) startup(ctx context.Context) {
 		a.clearSysProxyBackup()
 		a.log("Обнаружен и восстановлен системный прокси от прошлого сеанса.", "warn")
 	}
+
+	// Трей: иконка создаётся на всех поддерживаемых платформах (Windows, macOS).
+	a.windowVisible.Store(true)
+	trayInit(a)
+	trayUpdateStatus(a)
+
+	// Следим за сворачиванием окна — при включённой опции прячем в трей.
+	a.minPollStop = make(chan struct{})
+	go a.watchMinimize()
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
 func (a *App) beforeClose(ctx context.Context) bool {
 	if a.closeAllowed.Load() {
 		return false
+	}
+
+	// Если в настройках включено сворачивание в трей — прячем окно без диалога.
+	if a.getCfg().MinimizeToTray && trayAvailable() {
+		a.hideWindowToTray()
+		return true
 	}
 
 	a.tunnelMu.Lock()
@@ -260,60 +283,137 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		Type:          runtime.QuestionDialog,
 		Title:         "WinDTT",
 		Message:       msg,
-		Buttons:       []string{"Закрыть", "Отмена"},
+		Buttons:       []string{"В трей", "Закрыть", "Отмена"},
 		DefaultButton: "Закрыть",
 		CancelButton:  "Отмена",
 	})
 
-	cancelled := btn == "Отмена" || btn == "Cancel" || btn == "No" || btn == ""
-	if cancelled {
+	switch btn {
+	case "В трей", "Tray":
+		// Сворачиваем в трей, сервисы продолжают работать.
+		a.hideWindowToTray()
+		return true
+	case "Отмена", "Cancel", "No", "":
+		return true
+	default:
+		// «Закрыть» — останавливаем сервисы и выходим.
+		a.quitApp()
 		return true
 	}
+}
 
-	// Останавливаем сервисы если запущены
-	if tunnelActive || socksActive {
-		go func() {
-			// Системный прокси снимаем первым — восстановить настройки до выхода.
-			if a.sysProxyOn.Load() {
-				a.SystemProxyDisable()
+// hideWindowToTray прячет главное окно (сервисы продолжают работать).
+func (a *App) hideWindowToTray() {
+	a.windowVisible.Store(false)
+	if a.ctx != nil {
+		runtime.WindowHide(a.ctx)
+	}
+	trayUpdateStatus(a)
+}
+
+// showWindowFromTray разворачивает и показывает главное окно.
+func (a *App) showWindowFromTray() {
+	a.windowVisible.Store(true)
+	trayActivateApp()
+	if a.ctx != nil {
+		runtime.WindowUnminimise(a.ctx)
+		runtime.WindowShow(a.ctx)
+	}
+	trayUpdateStatus(a)
+}
+
+// watchMinimize следит за состоянием окна и прячет его в трей при
+// сворачивании, если включена опция TrayOnMinimize. Wails не эмитит событий
+// о сворачивании окна, поэтому используем поллинг runtime.WindowIsMinimised
+// (на Windows — IsIconic, на macOS — isMiniaturized).
+func (a *App) watchMinimize() {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	wasMin := false
+	for {
+		select {
+		case <-ticker.C:
+			min := runtime.WindowIsMinimised(a.ctx)
+			if min && !wasMin && a.windowVisible.Load() && a.getCfg().TrayOnMinimize && trayAvailable() {
+				a.hideWindowToTray()
 			}
-			if tunnelActive {
-				a.log("Останавливаю туннель...", "warn")
-				a.tunnelSend("STOP")
-				for i := 0; i < 40; i++ {
-					time.Sleep(100 * time.Millisecond)
-					a.tunnelMu.Lock()
-					running := a.tunnelRunning
-					a.tunnelMu.Unlock()
-					if !running {
-						break
-					}
-				}
+			wasMin = min
+		case <-a.minPollStop:
+			return
+		}
+	}
+}
+
+// quitApp останавливает сервисы и завершает приложение. Вызывается из трея
+// и из диалога закрытия. Guard через closeAllowed — второй вызов игнорируется.
+func (a *App) quitApp() {
+	if !a.closeAllowed.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer func() { recover() }()
+		// Системный прокси снимаем первым — восстановить настройки до выхода.
+		if a.sysProxyOn.Load() {
+			a.SystemProxyDisable()
+		}
+		a.tunnelMu.Lock()
+		tunnelActive := a.tunnelRunning
+		a.tunnelMu.Unlock()
+		if tunnelActive {
+			a.log("Останавливаю туннель...", "warn")
+			a.tunnelSend("STOP")
+			for i := 0; i < 40; i++ {
+				time.Sleep(100 * time.Millisecond)
 				a.tunnelMu.Lock()
-				proc := a.tunnelProc
-				still := a.tunnelRunning
+				running := a.tunnelRunning
 				a.tunnelMu.Unlock()
-				if still && proc != nil {
-					proc.Process.Kill()
+				if !running {
+					break
 				}
-				a.log("Туннель остановлен.", "warn")
 			}
-			if socksActive {
-				a.log("Останавливаю локальный прокси...", "warn")
-				a.SocksStop()
-				a.log("Локальный прокси остановлен.", "warn")
+			a.tunnelMu.Lock()
+			proc := a.tunnelProc
+			still := a.tunnelRunning
+			a.tunnelMu.Unlock()
+			if still && proc != nil {
+				proc.Process.Kill()
 			}
-			a.closeAllowed.Store(true)
-			runtime.Quit(ctx)
-		}()
-		return true
-	}
+			a.log("Туннель остановлен.", "warn")
+		}
+		if a.proxy.Running() {
+			a.log("Останавливаю локальный прокси...", "warn")
+			a.SocksStop()
+			a.log("Локальный прокси остановлен.", "warn")
+		}
+		if a.ctx != nil {
+			runtime.Quit(a.ctx)
+		}
+	}()
+}
 
-	// Ничего не запущено — закрываем сразу
-	return false
+// trayStatusText формирует строку статуса для меню трея.
+func (a *App) trayStatusText() string {
+	a.tunnelMu.Lock()
+	running := a.tunnelRunning
+	paused := a.tunnelPaused
+	workers := a.activeWorkers
+	a.tunnelMu.Unlock()
+	switch {
+	case paused:
+		return "Туннель: пауза"
+	case running:
+		return fmt.Sprintf("Туннель: активен (%d воркеров)", workers)
+	default:
+		return "Туннель: выключен"
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.minPollStop != nil {
+		close(a.minPollStop)
+		a.minPollStop = nil
+	}
+	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
 	a.TunnelStop()
 	StopWGTunnel()
@@ -742,6 +842,7 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 				total := a.totalWorkers
 				a.tunnelMu.Unlock()
 				runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: n, Total: total})
+				trayUpdateStatus(a)
 			}
 			// Парсим трафик и считаем скорость
 			if m := reTraffic.FindStringSubmatch(line); m != nil {
@@ -829,6 +930,7 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 				total := a.totalWorkers
 				a.tunnelMu.Unlock()
 				runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: n, Total: total})
+				trayUpdateStatus(a)
 			}
 		}
 
@@ -927,6 +1029,7 @@ func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
 		"running": false, "paused": false,
 	})
 	runtime.EventsEmit(a.ctx, "tunnel:workers", WorkerStats{Active: 0, Total: totalWorkers})
+	trayUpdateStatus(a)
 }
 
 func (a *App) tunnelSend(cmd string) {
@@ -1144,6 +1247,7 @@ func (a *App) TunnelPause() {
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": true,
 	})
+	trayUpdateStatus(a)
 }
 
 func (a *App) TunnelResume() {
@@ -1154,6 +1258,7 @@ func (a *App) TunnelResume() {
 	runtime.EventsEmit(a.ctx, "tunnel:status", map[string]interface{}{
 		"running": true, "paused": false,
 	})
+	trayUpdateStatus(a)
 }
 
 func (a *App) TunnelStop() {
@@ -1217,12 +1322,14 @@ func (a *App) ProxyStart(host, socks5Port, httpPort, user, pwd string, useAuth b
 		return err.Error()
 	}
 	runtime.EventsEmit(a.ctx, "socks:status", true)
+	trayUpdateStatus(a)
 	return ""
 }
 
 func (a *App) SocksStop() {
 	a.proxy.Stop()
 	runtime.EventsEmit(a.ctx, "socks:status", false)
+	trayUpdateStatus(a)
 }
 
 func (a *App) SocksStatus() bool {
@@ -1762,6 +1869,77 @@ func (a *App) SaveFileDialog(content string) bool {
 		return false
 	}
 	return os.WriteFile(path, []byte(content), 0644) == nil
+}
+
+// ── Импорт / экспорт конфигурации ─────────────────────────────────────────────
+
+// ExportConfig возвращает текущую конфигурацию в виде JSON-строки
+// (pretty-printed, как в windtt_config.json).
+func (a *App) ExportConfig() string {
+	data, err := json.MarshalIndent(a.getCfg(), "", "  ")
+	if err != nil {
+		a.log("⚠ Не удалось сериализовать конфиг для экспорта: "+err.Error(), "warn")
+		return ""
+	}
+	return string(data)
+}
+
+// SaveConfigDialog сохраняет JSON-конфигурацию через системный диалог
+// (права 0600 — файл содержит секреты).
+func (a *App) SaveConfigDialog(content string) bool {
+	path, _ := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Экспорт конфигурации",
+		DefaultFilename: "windtt_config.json",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON", Pattern: "*.json"},
+		},
+	})
+	if path == "" {
+		return false
+	}
+	return os.WriteFile(path, []byte(content), 0600) == nil
+}
+
+// ImportResult — результат импорта конфигурации для фронтенда.
+type ImportResult struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error"`
+	Config Config `json:"config"`
+}
+
+// ImportConfig открывает диалог выбора JSON-файла, парсит его и заменяет
+// текущую конфигурацию. Текущий DeviceID сохраняется — он присваивается
+// сервером и вряд ли подходит из импортированного файла. После импорта
+// правила маршрутизации применяются к работающему прокси.
+func (a *App) ImportConfig() ImportResult {
+	path, _ := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Импорт конфигурации",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "JSON", Pattern: "*.json"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+	if path == "" {
+		return ImportResult{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ImportResult{OK: false, Error: "Не удалось прочитать файл: "+err.Error()}
+	}
+	var imported Config
+	if err := json.Unmarshal(data, &imported); err != nil {
+		return ImportResult{OK: false, Error: "Некорректный JSON конфигурации: "+err.Error()}
+	}
+	a.cfgMu.Lock()
+	imported.DeviceID = a.cfg.DeviceID
+	a.cfg = imported
+	a.cfgMu.Unlock()
+	if err := a.persistConfig(); err != nil {
+		return ImportResult{OK: false, Error: err.Error()}
+	}
+	a.applyRouting()
+	a.routingLog("Конфигурация импортирована.", "info")
+	return ImportResult{OK: true, Config: a.getCfg()}
 }
 
 // ── Platform-specific ─────────────────────────────────────────────────────────
