@@ -842,6 +842,9 @@ async function saveRoutingRules() {
   }
   // Убеждаемся, что правила загружены и применены к прокси.
   await window.go.main.App.EnsureRulesetsLoaded();
+  // Сохраняем и остальные настройки (DNS и т.п.) — SaveConfig на Go-стороне
+  // сохраняет переданные правила, т.к. collectConfig не отправляет rulesets.
+  await saveConfig();
   routingLog('Маршрутизация: правила маршрутизации сохранены.', 'success');
   showToast('Правила маршрутизации сохранены.', 'success');
   const status = await window.go.main.App.GetRulesetStatus();

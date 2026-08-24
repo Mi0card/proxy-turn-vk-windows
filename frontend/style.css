@@ -837,7 +837,7 @@ body.light .ruleset-type { color: var(--accent); }
 .advanced-block summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 10px 0;
   cursor: pointer;
   color: var(--text-2);
@@ -861,6 +861,7 @@ body.light .ruleset-type { color: var(--accent); }
 }
 .advanced-block[open] summary::before { transform: rotate(45deg); margin-top: 2px; }
 .advanced-block summary:hover { color: var(--text-1); }
+.rr-advanced { margin-bottom: 12px; }
 
 /* ══════════ WireGuard ══════════ */
 .wg-conf {
