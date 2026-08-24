@@ -62,7 +62,7 @@ func wgDialStrict(network, addr string) (net.Conn, error) {
 	return nil, fmt.Errorf("туннель не активен")
 }
 
-func StartWGTunnel(conf string) error {
+func StartWGTunnel(conf string, dnsOverride []netip.Addr) error {
 	wgTun.mu.Lock()
 	defer wgTun.mu.Unlock()
 
@@ -75,6 +75,10 @@ func StartWGTunnel(conf string) error {
 	parsed, err := parseWGConf(conf)
 	if err != nil {
 		return fmt.Errorf("парсинг конфига: %w", err)
+	}
+
+	if len(dnsOverride) > 0 {
+		parsed.dns = dnsOverride
 	}
 
 	tun, tnet, err := netstack.CreateNetTUN(parsed.addresses, parsed.dns, parsed.mtu)
@@ -204,6 +208,18 @@ func parseWGConf(conf string) (*wgParsed, error) {
 	}
 	p.ipc = ipc.String()
 	return p, nil
+}
+
+// ParseDNSOverride разбирает строку DNS-серверов через запятую в список адресов.
+// Невалидные записи пропускаются; пустая строка возвращает nil.
+func ParseDNSOverride(s string) []netip.Addr {
+	var out []netip.Addr
+	for _, d := range strings.Split(s, ",") {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(d)); err == nil {
+			out = append(out, addr)
+		}
+	}
+	return out
 }
 
 // parseProxyAuth читает Proxy-Authorization заголовок (Basic).

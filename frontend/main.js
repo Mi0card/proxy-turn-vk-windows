@@ -254,6 +254,8 @@ function loadConfig(cfg) {
   const rdp = document.getElementById('rr-default-policy');
   if (rdp) rdp.value = cfg.routing_default || 'proxy';
 
+  if (cfg.dns) setVal('rr-dns', cfg.dns);
+
   // px_use_auth: undefined → оставляем HTML-дефолт (checked)
   if (cfg.px_use_auth !== undefined) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
@@ -284,6 +286,7 @@ function collectConfig() {
     px_pass:      getVal('px-pass'),
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
+    dns:             getVal('rr-dns') || '',
     minimize_to_tray: document.getElementById('minimize-tray')?.checked || false,
     tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
@@ -1587,6 +1590,8 @@ WireGuard over VK TURN — туннель через звонки VK
   (вверху вкладки): proxy / direct / block.
   Кнопка «Обновить правила» скачивает geosite/geoip
   из runetfreedom/russia-v2ray-rules-dat.
+  DNS: укажите IP серверов через запятую (1.1.1.1, 8.8.8.8),
+    пусто — использовать DNS из конфига сервера.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DEPLOY

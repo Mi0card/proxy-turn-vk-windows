@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.7.3"
+const AppVersion = "0.2.8.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +50,7 @@ type Config struct {
 	Rulesets       []RulesetConfig `json:"rulesets"`
 	RulesViaTunnel bool            `json:"rules_via_tunnel"`
 	RoutingDefault string          `json:"routing_default"`
+	DNS            string          `json:"dns"`
 	MinimizeToTray bool            `json:"minimize_to_tray"`
 	TrayOnMinimize bool            `json:"tray_on_minimize"`
 }
@@ -812,14 +813,20 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 		ll := strings.ToLower(line)
 
 		// Блок WireGuard конфига — копим строки рамки, сбрасываем по нижней.
+		// Рамка ╔…║…╚ украшательская; убираем её: логируем чистые строки конфига.
 		if inWgBox || strings.Contains(line, "WireGuard Конфиг") {
-			wgBoxBuf = append(wgBoxBuf, line)
+			clean := strings.Trim(line, " ║╔╚═")
+			if clean != "" {
+				wgBoxBuf = append(wgBoxBuf, clean)
+			}
 			if strings.Contains(line, "WireGuard Конфиг") {
 				inWgBox = true
 			}
 			if strings.HasPrefix(line, "╚") {
 				inWgBox = false
-				a.log("   "+strings.Join(wgBoxBuf, "\n"), "info")
+				if len(wgBoxBuf) > 0 {
+					a.log("   "+strings.Join(wgBoxBuf, "\n"), "info")
+				}
 				wgBoxBuf = nil
 			} else if len(wgBoxBuf) > 64 {
 				// Страховка: блок оборвался — не глотаем остальной лог.
@@ -949,8 +956,8 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 					conf := strings.TrimSpace(string(data))
 					runtime.EventsEmit(a.ctx, "tunnel:wgconfig", conf)
 					// Поднимаем WireGuard userspace для прокси
-					go func() {
-						if err := StartWGTunnel(conf); err != nil {
+go func() {
+					if err := StartWGTunnel(conf, ParseDNSOverride(a.getCfg().DNS)); err != nil {
 							a.log("   [WG] Ошибка netstack: "+err.Error(), "warn")
 						} else {
 							a.log("   [WG] Userspace туннель активен — прокси работает через туннель.", "success")
