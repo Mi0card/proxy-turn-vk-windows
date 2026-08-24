@@ -953,7 +953,7 @@ body.light .ruleset-type { color: var(--accent); }
   line-height: 1.6;
   user-select: text;
   min-height: 0;
-  white-space: pre-line;
+  white-space: pre-wrap;
 }
 .log-box-full:empty::before,
 .deploy-log-box:empty::before {
