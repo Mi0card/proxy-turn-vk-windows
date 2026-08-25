@@ -343,6 +343,14 @@ function applyProfile(p) {
   setOpt('fingerprint', p.fingerprint);
 }
 
+// Сбрасывает поля подключения к пустым значениям.
+function clearForm() {
+  setVkHashes('');
+  const direct = (id) => { const el = document.getElementById(id); if (el) el.value = ''; };
+  direct('srv'); direct('sec'); direct('n-workers'); direct('listen');
+  direct('captcha-mode'); direct('obfs-mode'); direct('fingerprint');
+}
+
 // Снимок текущей формы в виде «профиля» (без имени) для dirty-проверки.
 function formSnapshot() {
   const p = collectProfile();
@@ -380,6 +388,10 @@ async function initProfiles() {
   document.getElementById('btn-prof-rename').addEventListener('click', renameProfile);
   document.getElementById('btn-prof-del').addEventListener('click', deleteProfile);
   document.getElementById('profile-modal-ok').addEventListener('click', confirmProfileModal);
+  document.getElementById('profile-modal-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); confirmProfileModal(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeProfileModal(); }
+  });
 
   renderProfiles();
 
@@ -496,14 +508,19 @@ async function deleteProfile() {
   if (state.activeProfile === name) state.activeProfile = '';
   state.loadedProfile = null;
   renderProfiles();
-  if (state.connProfiles.length === 0) {
-    // Очищаем форму подключения
-    setVkHashes('');
-    const direct = (id) => { const el = document.getElementById(id); if (el) el.value = ''; };
-    direct('srv'); direct('sec'); direct('n-workers'); direct('listen');
-    direct('captcha-mode'); direct('obfs-mode'); direct('fingerprint');
+  // Автовыбор следующего профиля (или сброс формы, если профилей не осталось).
+  const dsel = document.getElementById('conn-profile');
+  const nextName = dsel.value;
+  if (nextName) {
+    const next = state.connProfiles.find(x => x.name === nextName) || null;
+    applyProfile(next);
+    setLoadedProfile(next);
+    state.activeProfile = nextName;
+  } else {
+    clearForm();
   }
   await window.go.main.App.SetActiveProfile(state.activeProfile);
+  await saveConfig();
   showToast('Профиль удалён', 'success');
 }
 
@@ -529,14 +546,17 @@ async function confirmProfileModal() {
       showToast('Профиль с таким именем уже существует', 'error');
       return;
     }
-    const p = collectProfile();
-    p.name = name;
+    const p = { name, vk: '', srv: '', sec: '', n: '9', listen: '127.0.0.1:9000', captcha_mode: 'auto', obfs_mode: 'audio', fingerprint: 'firefox' };
     await window.go.main.App.SaveProfile(p);
     state.connProfiles.push(p);
     state.activeProfile = name;
     await window.go.main.App.SetActiveProfile(name);
+    clearForm();
     setLoadedProfile(p);
     renderProfiles();
+    // Фокус на первый хеш, чтобы сразу начать ввод.
+    const firstHash = document.querySelector('.vk-hash');
+    if (firstHash) firstHash.focus();
     showToast('Профиль добавлен', 'success');
   } else if (state.modalMode === 'rename') {
     const oldName = state.renameFrom;

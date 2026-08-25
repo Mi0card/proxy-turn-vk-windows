@@ -411,8 +411,16 @@ body.sidebar-collapsed .collapse-btn .ico { transform: rotate(180deg); }
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.4));
   padding: 18px;
-  width: 320px;
+  width: 340px;
   max-width: 90vw;
+}
+.modal .inp { width: 100%; box-sizing: border-box; }
+.modal-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
 }
 .modal-title {
   margin: 0 0 12px;

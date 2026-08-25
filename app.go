@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.9.0"
+const AppVersion = "0.2.9.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -447,6 +447,33 @@ func (a *App) loadConfig() {
 	a.cfgMu.Lock()
 	defer a.cfgMu.Unlock()
 	json.Unmarshal(data, &a.cfg)
+	a.migrateLegacyProfileLocked()
+}
+
+// migrateLegacyProfileLocked: если профили подключения ещё не созданы, а в конфиге
+// есть ранее сохранённые параметры подключения (без имени профиля) — сохраняем их
+// как «Профиль 1» и делаем активным. Вызывается при загрузке, cfgMu уже взят.
+func (a *App) migrateLegacyProfileLocked() {
+	if len(a.cfg.Profiles) > 0 {
+		return
+	}
+	if strings.TrimSpace(a.cfg.VK) == "" && strings.TrimSpace(a.cfg.Srv) == "" && strings.TrimSpace(a.cfg.Sec) == "" {
+		return
+	}
+	p := ConnProfile{
+		Name:        "Профиль 1",
+		VK:          a.cfg.VK,
+		Srv:         a.cfg.Srv,
+		Sec:         a.cfg.Sec,
+		N:           a.cfg.N,
+		Listen:      a.cfg.Listen,
+		CaptchaMode: a.cfg.CaptchaMode,
+		ObfsMode:    a.cfg.ObfsMode,
+		Fingerprint: a.cfg.Fingerprint,
+	}
+	a.cfg.Profiles = []ConnProfile{p}
+	a.cfg.ActiveProfile = p.Name
+	a.persistConfig()
 }
 
 // getCfg возвращает копию конфига под RLock.

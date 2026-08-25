@@ -119,7 +119,7 @@
                 <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
               </button>
               <button class="icon-btn profile-add" id="btn-prof-add" title="Добавить профиль" aria-label="Добавить профиль">
-                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
               </button>
               <button class="icon-btn" id="btn-prof-rename" title="Переименовать профиль" aria-label="Переименовать профиль">
                 <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
@@ -572,6 +572,7 @@ PersistentKeepalive = 25
 <div id="profile-modal" class="modal-overlay" style="display:none">
   <div class="modal">
     <h3 class="modal-title" id="profile-modal-title">Название профиля</h3>
+    <label class="modal-label" for="profile-modal-input">Имя профиля</label>
     <input id="profile-modal-input" type="text" class="inp" placeholder="Например: Сервер 1">
     <div class="modal-btns">
       <button class="btn" onclick="closeProfileModal()">Отмена</button>
