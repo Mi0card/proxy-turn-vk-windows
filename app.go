@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.9.1"
+const AppVersion = "0.2.9.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -473,7 +473,22 @@ func (a *App) migrateLegacyProfileLocked() {
 	}
 	a.cfg.Profiles = []ConnProfile{p}
 	a.cfg.ActiveProfile = p.Name
+	a.clearLegacyConnFieldsLocked()
 	a.persistConfig()
+}
+
+// clearLegacyConnFieldsLocked убирает из конфига старые «безымянные» записи
+// параметров подключения — после миграции они живут только в профилях.
+// Вызывается при взятой cfgMu.
+func (a *App) clearLegacyConnFieldsLocked() {
+	a.cfg.VK = ""
+	a.cfg.Srv = ""
+	a.cfg.Sec = ""
+	a.cfg.N = ""
+	a.cfg.Listen = ""
+	a.cfg.CaptchaMode = ""
+	a.cfg.ObfsMode = ""
+	a.cfg.Fingerprint = ""
 }
 
 // getCfg возвращает копию конфига под RLock.
@@ -503,6 +518,16 @@ func (a *App) SaveConfig(cfg Config) {
 	if cfg.ActiveProfile == "" {
 		cfg.ActiveProfile = a.cfg.ActiveProfile
 	}
+	// Параметры подключения живут только в профилях — не позволяем фронтенду
+	// вернуть в конфиг старые «безымянные» записи.
+	cfg.VK = ""
+	cfg.Srv = ""
+	cfg.Sec = ""
+	cfg.N = ""
+	cfg.Listen = ""
+	cfg.CaptchaMode = ""
+	cfg.ObfsMode = ""
+	cfg.Fingerprint = ""
 	a.cfg = cfg
 	a.cfgMu.Unlock()
 	a.persistConfig()
