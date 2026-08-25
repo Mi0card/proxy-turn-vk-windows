@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.9.2"
+const AppVersion = "0.2.9.3"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -45,14 +45,14 @@ type ConnProfile struct {
 }
 
 type Config struct {
-	VK             string          `json:"vk"`
-	Srv            string          `json:"srv"`
-	Sec            string          `json:"sec"`
-	N              string          `json:"n"`
-	Listen         string          `json:"listen"`
-	CaptchaMode    string          `json:"captcha_mode"`
-	ObfsMode       string          `json:"obfs_mode"`
-	Fingerprint    string          `json:"fingerprint"`
+	VK             string          `json:"vk,omitempty"`
+	Srv            string          `json:"srv,omitempty"`
+	Sec            string          `json:"sec,omitempty"`
+	N              string          `json:"n,omitempty"`
+	Listen         string          `json:"listen,omitempty"`
+	CaptchaMode    string          `json:"captcha_mode,omitempty"`
+	ObfsMode       string          `json:"obfs_mode,omitempty"`
+	Fingerprint    string          `json:"fingerprint,omitempty"`
 	DeviceID       string          `json:"device_id"`
 	Profiles       []ConnProfile   `json:"profiles"`
 	ActiveProfile  string          `json:"active_profile"`
