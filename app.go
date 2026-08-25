@@ -26,9 +26,23 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.8.1"
+const AppVersion = "0.2.9.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
+
+// ConnProfile хранит набор параметров подключения, который можно сохранить,
+// переключить, переименовать и удалить через вкладку «Подключение».
+type ConnProfile struct {
+	Name        string `json:"name"`
+	VK          string `json:"vk"`
+	Srv         string `json:"srv"`
+	Sec         string `json:"sec"`
+	N           string `json:"n"`
+	Listen      string `json:"listen"`
+	CaptchaMode string `json:"captcha_mode"`
+	ObfsMode    string `json:"obfs_mode"`
+	Fingerprint string `json:"fingerprint"`
+}
 
 type Config struct {
 	VK             string          `json:"vk"`
@@ -40,6 +54,8 @@ type Config struct {
 	ObfsMode       string          `json:"obfs_mode"`
 	Fingerprint    string          `json:"fingerprint"`
 	DeviceID       string          `json:"device_id"`
+	Profiles       []ConnProfile   `json:"profiles"`
+	ActiveProfile  string          `json:"active_profile"`
 	PxHost         string          `json:"px_host"`
 	PxSocksPort    string          `json:"px_socks_port"`
 	PxHttpPort     string          `json:"px_http_port"`
@@ -51,7 +67,7 @@ type Config struct {
 	RulesViaTunnel bool            `json:"rules_via_tunnel"`
 	RoutingDefault string          `json:"routing_default"`
 	DNS            string          `json:"dns"`
-	MinimizeToTray bool            `json:"minimize_to_tray"`
+	TrayOnExit     bool            `json:"tray_on_exit"`
 	TrayOnMinimize bool            `json:"tray_on_minimize"`
 }
 
@@ -254,7 +270,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 
 	// Если в настройках включено сворачивание в трей — прячем окно без диалога.
-	if a.getCfg().MinimizeToTray && trayAvailable() {
+	if a.getCfg().TrayOnExit && trayAvailable() {
 		a.hideWindowToTray()
 		return true
 	}
@@ -454,6 +470,12 @@ func (a *App) SaveConfig(cfg Config) {
 	if cfg.DeviceID == "" {
 		cfg.DeviceID = a.cfg.DeviceID
 	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = a.cfg.Profiles
+	}
+	if cfg.ActiveProfile == "" {
+		cfg.ActiveProfile = a.cfg.ActiveProfile
+	}
 	a.cfg = cfg
 	a.cfgMu.Unlock()
 	a.persistConfig()
@@ -461,6 +483,90 @@ func (a *App) SaveConfig(cfg Config) {
 
 func (a *App) GetVersion() string {
 	return AppVersion
+}
+
+// ── Профили подключения ────────────────────────────────────────────────────────
+
+// GetProfiles возвращает список сохранённых профилей подключения.
+func (a *App) GetProfiles() []ConnProfile {
+	return a.getCfg().Profiles
+}
+
+// GetActiveProfile возвращает имя активного профиля подключения ("" если нет).
+func (a *App) GetActiveProfile() string {
+	return a.getCfg().ActiveProfile
+}
+
+// SaveProfile сохраняет (создаёт или перезаписывает по имени) профиль подключения.
+func (a *App) SaveProfile(p ConnProfile) {
+	a.cfgMu.Lock()
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		a.cfgMu.Unlock()
+		return
+	}
+	p.Name = name
+	idx := -1
+	for i, pr := range a.cfg.Profiles {
+		if pr.Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx >= 0 {
+		a.cfg.Profiles[idx] = p
+	} else {
+		a.cfg.Profiles = append(a.cfg.Profiles, p)
+	}
+	a.cfgMu.Unlock()
+	a.persistConfig()
+}
+
+// DeleteProfile удаляет профиль подключения по имени. Если удаляется активный
+// профиль — активный сбрасывается.
+func (a *App) DeleteProfile(name string) {
+	a.cfgMu.Lock()
+	out := a.cfg.Profiles[:0]
+	for _, pr := range a.cfg.Profiles {
+		if pr.Name != name {
+			out = append(out, pr)
+		}
+	}
+	a.cfg.Profiles = out
+	if a.cfg.ActiveProfile == name {
+		a.cfg.ActiveProfile = ""
+	}
+	a.cfgMu.Unlock()
+	a.persistConfig()
+}
+
+// RenameProfile переименовывает профиль подключения.
+func (a *App) RenameProfile(oldName, newName string) {
+	a.cfgMu.Lock()
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		a.cfgMu.Unlock()
+		return
+	}
+	for i := range a.cfg.Profiles {
+		if a.cfg.Profiles[i].Name == oldName {
+			a.cfg.Profiles[i].Name = newName
+			if a.cfg.ActiveProfile == oldName {
+				a.cfg.ActiveProfile = newName
+			}
+			break
+		}
+	}
+	a.cfgMu.Unlock()
+	a.persistConfig()
+}
+
+// SetActiveProfile устанавливает активный профиль подключения.
+func (a *App) SetActiveProfile(name string) {
+	a.cfgMu.Lock()
+	a.cfg.ActiveProfile = name
+	a.cfgMu.Unlock()
+	a.persistConfig()
 }
 
 // GetTheme возвращает сохранённую тему, либо "" если пользователь ещё

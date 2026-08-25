@@ -15,6 +15,9 @@ const state = {
   activeTab:       'connect',
   activeWorkers:  0,
   totalWorkers:   0,
+  connProfiles:   [],   // [{name, vk, srv, sec, n, listen, captcha_mode, obfs_mode, fingerprint}]
+  activeProfile:  '',
+  loadedProfile:  null, // профиль, поля которого сейчас в форме (снимок для dirty-проверки)
 };
 
 // ── Иконки (inline SVG для динамической разметки) ───────────────────────────
@@ -125,6 +128,9 @@ window.addEventListener('load', async () => {
   // Загружаем конфиг и заполняем поля
   const cfg = await window.go.main.App.GetConfig();
   loadConfig(cfg);
+
+  // Инициализируем профили подключения
+  await initProfiles();
 
   // Восстанавливаем состояние кнопок прокси (если прокси уже запущен).
   try {
@@ -261,7 +267,7 @@ function loadConfig(cfg) {
     document.getElementById('px-use-auth').checked = cfg.px_use_auth !== false;
   }
   const mtr = document.getElementById('minimize-tray');
-  if (mtr && cfg.minimize_to_tray !== undefined) mtr.checked = !!cfg.minimize_to_tray;
+  if (mtr && cfg.tray_on_exit !== undefined) mtr.checked = !!cfg.tray_on_exit;
   const mtm = document.getElementById('minimize-tray-on-min');
   if (mtm && cfg.tray_on_minimize !== undefined) mtm.checked = !!cfg.tray_on_minimize;
   toggleAuth();
@@ -287,7 +293,7 @@ function collectConfig() {
     rules_via_tunnel: document.getElementById('rr-via-tunnel').checked,
     routing_default:  document.getElementById('rr-default-policy')?.value || 'proxy',
     dns:             getVal('rr-dns') || '',
-    minimize_to_tray: document.getElementById('minimize-tray')?.checked || false,
+    tray_on_exit: document.getElementById('minimize-tray')?.checked || false,
     tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
@@ -296,6 +302,260 @@ function collectConfig() {
 async function saveConfig() {
   const cfg = collectConfig();
   await window.go.main.App.SaveConfig(cfg);
+}
+
+// ── Профили подключения ───────────────────────────────────────────────────────
+
+function collectProfile() {
+  const setSel = (id, fallback) => {
+    const el = document.getElementById(id);
+    return el ? el.value : fallback;
+  };
+  return {
+    name: '',
+    vk:           getVkHashes(),
+    srv:          getVal('srv'),
+    sec:          getVal('sec'),
+    n:            getVal('n-workers') || '9',
+    listen:       getVal('listen') || '127.0.0.1:9000',
+    captcha_mode: setSel('captcha-mode', 'auto'),
+    obfs_mode:    setSel('obfs-mode', 'audio'),
+    fingerprint:  setSel('fingerprint', 'firefox'),
+  };
+}
+
+// Применяет профиль к форме (поля подключения).
+function applyProfile(p) {
+  if (!p) return;
+  setVkHashes(p.vk);
+  const direct = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  direct('srv', p.srv);
+  direct('sec', p.sec);
+  direct('n-workers', p.n);
+  direct('listen', p.listen);
+  const setOpt = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = v || '';
+  };
+  setOpt('captcha-mode', p.captcha_mode);
+  setOpt('obfs-mode', p.obfs_mode);
+  setOpt('fingerprint', p.fingerprint);
+}
+
+// Снимок текущей формы в виде «профиля» (без имени) для dirty-проверки.
+function formSnapshot() {
+  const p = collectProfile();
+  delete p.name;
+  return p;
+}
+
+function profilesEqual(a, b) {
+  if (!a || !b) return false;
+  return ['vk','srv','sec','n','listen','captcha_mode','obfs_mode','fingerprint']
+    .every(k => (a[k] || '') === (b[k] || ''));
+}
+
+// Есть ли несохранённые изменения относительно загруженного профиля?
+function isProfileDirty() {
+  return state.loadedProfile && !profilesEqual(formSnapshot(), state.loadedProfile);
+}
+
+function setLoadedProfile(p) {
+  state.loadedProfile = p ? Object.assign({}, p) : null;
+}
+
+async function initProfiles() {
+  const profiles = await window.go.main.App.GetProfiles();
+  const active = await window.go.main.App.GetActiveProfile();
+  state.connProfiles = profiles || [];
+  state.activeProfile = active || '';
+
+  const sel = document.getElementById('conn-profile');
+  if (sel) {
+    sel.addEventListener('change', onProfileChange);
+  }
+  document.getElementById('btn-prof-save').addEventListener('click', saveProfileFromForm);
+  document.getElementById('btn-prof-add').addEventListener('click', addProfile);
+  document.getElementById('btn-prof-rename').addEventListener('click', renameProfile);
+  document.getElementById('btn-prof-del').addEventListener('click', deleteProfile);
+  document.getElementById('profile-modal-ok').addEventListener('click', confirmProfileModal);
+
+  renderProfiles();
+
+  // Автозагрузка активного профиля (чтобы «Подключить» сразу использовал его).
+  const ap = state.connProfiles.find(p => p.name === state.activeProfile);
+  if (ap) {
+    applyProfile(ap);
+    setLoadedProfile(ap);
+  }
+}
+
+function renderProfiles() {
+  const sel = document.getElementById('conn-profile');
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (state.connProfiles.length === 0) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = 'Профиль не выбран';
+    sel.appendChild(o);
+  } else {
+    state.connProfiles.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.name;
+      o.textContent = p.name;
+      sel.appendChild(o);
+    });
+  }
+  if (state.connProfiles.length) {
+    sel.value = state.activeProfile && state.connProfiles.some(p => p.name === state.activeProfile)
+      ? state.activeProfile
+      : state.connProfiles[0].name;
+  } else {
+    sel.value = '';
+  }
+}
+
+async function confirmDiscard() {
+  if (!isProfileDirty()) return true;
+  return window.go.main.App.ConfirmDialog(
+    'Профиль изменён',
+    'В форме есть несохранённые изменения. Продолжить без сохранения?'
+  );
+}
+
+async function onProfileChange() {
+  const sel = document.getElementById('conn-profile');
+  const name = sel.value;
+  if (name && name !== (state.loadedProfile && state.loadedProfile.name)) {
+    if (!(await confirmDiscard())) {
+      sel.value = state.loadedProfile ? state.loadedProfile.name : '';
+      return;
+    }
+  }
+  const p = state.connProfiles.find(x => x.name === name) || null;
+  applyProfile(p);
+  setLoadedProfile(p);
+  if (name) {
+    state.activeProfile = name;
+    await window.go.main.App.SetActiveProfile(name);
+  }
+}
+
+async function saveProfileFromForm() {
+  const sel = document.getElementById('conn-profile');
+  const name = sel.value;
+  if (!name) {
+    showToast('Сначала выберите или добавьте профиль', 'warn');
+    return;
+  }
+  const p = collectProfile();
+  p.name = name;
+  await window.go.main.App.SaveProfile(p);
+  state.activeProfile = name;
+  await window.go.main.App.SetActiveProfile(name);
+  const existing = state.connProfiles.find(x => x.name === name);
+  if (existing) Object.assign(existing, p);
+  else state.connProfiles.push(p);
+  setLoadedProfile(p);
+  showToast('Профиль сохранён', 'success');
+  await saveConfig();
+}
+
+async function addProfile() {
+  const sel = document.getElementById('conn-profile');
+  const currentName = sel.value;
+  if (currentName && !(await confirmDiscard())) return;
+  state.modalMode = 'add';
+  document.getElementById('profile-modal-title').textContent = 'Название нового профиля';
+  document.getElementById('profile-modal-input').value = '';
+  openProfileModal();
+}
+
+async function renameProfile() {
+  const sel = document.getElementById('conn-profile');
+  const name = sel.value;
+  if (!name) { showToast('Сначала выберите профиль', 'warn'); return; }
+  if (!(await confirmDiscard())) return;
+  state.modalMode = 'rename';
+  state.renameFrom = name;
+  document.getElementById('profile-modal-title').textContent = 'Переименовать профиль';
+  document.getElementById('profile-modal-input').value = name;
+  openProfileModal();
+}
+
+async function deleteProfile() {
+  const sel = document.getElementById('conn-profile');
+  const name = sel.value;
+  if (!name) { showToast('Сначала выберите профиль', 'warn'); return; }
+  const ok = await window.go.main.App.ConfirmDialog('Удалить профиль', `Удалить профиль «${name}»?`);
+  if (!ok) return;
+  await window.go.main.App.DeleteProfile(name);
+  state.connProfiles = state.connProfiles.filter(p => p.name !== name);
+  if (state.activeProfile === name) state.activeProfile = '';
+  state.loadedProfile = null;
+  renderProfiles();
+  if (state.connProfiles.length === 0) {
+    // Очищаем форму подключения
+    setVkHashes('');
+    const direct = (id) => { const el = document.getElementById(id); if (el) el.value = ''; };
+    direct('srv'); direct('sec'); direct('n-workers'); direct('listen');
+    direct('captcha-mode'); direct('obfs-mode'); direct('fingerprint');
+  }
+  await window.go.main.App.SetActiveProfile(state.activeProfile);
+  showToast('Профиль удалён', 'success');
+}
+
+function openProfileModal() {
+  document.getElementById('profile-modal').style.display = 'flex';
+  const inp = document.getElementById('profile-modal-input');
+  inp.focus();
+  inp.select();
+}
+
+function closeProfileModal() {
+  document.getElementById('profile-modal').style.display = 'none';
+}
+
+async function confirmProfileModal() {
+  const inp = document.getElementById('profile-modal-input');
+  const name = inp.value.trim();
+  closeProfileModal();
+  if (!name) { showToast('Введите имя профиля', 'warn'); return; }
+
+  if (state.modalMode === 'add') {
+    if (state.connProfiles.some(p => p.name === name)) {
+      showToast('Профиль с таким именем уже существует', 'error');
+      return;
+    }
+    const p = collectProfile();
+    p.name = name;
+    await window.go.main.App.SaveProfile(p);
+    state.connProfiles.push(p);
+    state.activeProfile = name;
+    await window.go.main.App.SetActiveProfile(name);
+    setLoadedProfile(p);
+    renderProfiles();
+    showToast('Профиль добавлен', 'success');
+  } else if (state.modalMode === 'rename') {
+    const oldName = state.renameFrom;
+    if (name === oldName) return;
+    if (state.connProfiles.some(p => p.name === name)) {
+      showToast('Профиль с таким именем уже существует', 'error');
+      return;
+    }
+    await window.go.main.App.RenameProfile(oldName, name);
+    const p = state.connProfiles.find(x => x.name === oldName);
+    if (p) {
+      p.name = name;
+      if (state.activeProfile === oldName) state.activeProfile = name;
+      if (state.loadedProfile && state.loadedProfile.name === oldName) state.loadedProfile.name = name;
+    }
+    renderProfiles();
+    showToast('Профиль переименован', 'success');
+  }
+  await saveConfig();
 }
 
 // ── Парсим wdtt:// ─────────────────────────────────────────────────────────────

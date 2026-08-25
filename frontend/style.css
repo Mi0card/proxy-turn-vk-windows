@@ -379,6 +379,49 @@ body.sidebar-collapsed .collapse-btn .ico { transform: rotate(180deg); }
   margin-bottom: 12px;
 }
 
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.card-head .card-title { margin-bottom: 0; }
+
+.profile-bar { display: flex; align-items: center; gap: 4px; }
+.profile-bar .sel { min-width: 150px; }
+.profile-add .ico { color: var(--success); }
+.profile-add:hover .ico { color: var(--success); }
+.profile-del .ico { color: #ef4444; }
+.profile-del:hover .ico { color: #ef4444; }
+
+/* Модал ввода имени профиля */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,.4));
+  padding: 18px;
+  width: 320px;
+  max-width: 90vw;
+}
+.modal-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
 /* ══════════ Fields ══════════ */
 .fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .fields--top { margin-top: 8px; }
