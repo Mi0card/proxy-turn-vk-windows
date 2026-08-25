@@ -551,7 +551,7 @@ async function confirmProfileModal() {
     state.connProfiles.push(p);
     state.activeProfile = name;
     await window.go.main.App.SetActiveProfile(name);
-    clearForm();
+    applyProfile(p);
     setLoadedProfile(p);
     renderProfiles();
     // Фокус на первый хеш, чтобы сразу начать ввод.
