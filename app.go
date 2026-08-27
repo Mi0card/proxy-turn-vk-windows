@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.9.4"
+const AppVersion = "0.2.9.5"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
