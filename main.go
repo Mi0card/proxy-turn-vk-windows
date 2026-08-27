@@ -68,6 +68,7 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
+			WebviewGpuIsDisabled: true,
 			Theme:                windows.SystemDefault,
 		},
 	})
