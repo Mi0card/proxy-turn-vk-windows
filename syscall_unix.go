@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package main
 
@@ -11,9 +11,9 @@ func sysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{}
 }
 
-// ── Заглушки системного прокси (только Windows) ──────────────────────────────
+// ── Заглушки системного прокси (Windows и macOS реализованы отдельно) ────────
 
-var errSysProxyUnsupported = errors.New("system proxy поддерживается только на Windows")
+var errSysProxyUnsupported = errors.New("system proxy поддерживается только на Windows и macOS")
 
 // sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
 func sysProxySupported() bool { return false }

@@ -11,23 +11,29 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// ── System Proxy (WinINET) ───────────────────────────────────────────────────
+// ── System Proxy (Windows: WinINET / macOS: networksetup) ─────────────────────
 
-const sysProxyOverride = "<local>;127.0.0.1;localhost;*.local" // bypass
+// sysProxyOverride — адреса, которые не должны идти через системный прокси.
+// Формат зависит от платформы: на Windows это список, разделённый ';' с токеном
+// <local>; на macOS networksetup ожидает список доменов через запятую (без
+// <local>). Платформенные функции в syscall_*.go приводят к нужному виду.
+const sysProxyOverride = "<local>;127.0.0.1;localhost;*.local"
 
-// sysProxySnapshot хранит прежнее состояние прокси-настроек реестра.
+// sysProxySnapshot хранит прежнее состояние системного прокси.
 // Определён здесь (платформонезависимо), чтобы JSON backup/restore
 // компилировались везде. Платформенные функции в syscall_*.go заполняют/
-// используют поля только на Windows.
+// используют поля только на своей ОС: Windows — реестр WinINET, macOS —
+// настройки сетевых сервисов через networksetup (Darwin).
 type sysProxySnapshot struct {
-	ProxyEnable   uint32 `json:"proxy_enable"`
-	ProxyServer   string `json:"proxy_server"`
-	ProxyOverride string `json:"proxy_override"`
-	AutoConfigURL string `json:"auto_config_url"`
-	HadEnable     bool   `json:"had_enable"`
-	HadServer     bool   `json:"had_server"`
-	HadOverride   bool   `json:"had_override"`
-	HadACU        bool   `json:"had_acu"`
+	ProxyEnable   uint32          `json:"proxy_enable"`
+	ProxyServer   string          `json:"proxy_server"`
+	ProxyOverride string          `json:"proxy_override"`
+	AutoConfigURL string          `json:"auto_config_url"`
+	HadEnable     bool            `json:"had_enable"`
+	HadServer     bool            `json:"had_server"`
+	HadOverride   bool            `json:"had_override"`
+	HadACU        bool            `json:"had_acu"`
+	Darwin        json.RawMessage `json:"darwin,omitempty"`
 }
 
 // ── Backup / restore на диск (crash-safe) ────────────────────────────────────
