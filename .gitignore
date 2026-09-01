@@ -6,14 +6,3 @@ assets/server/wdtt-server
 
 # Upstream clone (sync.yml)
 upstream/
-
-# IDE
-.idea/
-.vscode/
-.pi/
-.aider*
-.nanocoder/
-
-# EXTRA
-AGENTS.md
-plans/
