@@ -17,6 +17,13 @@
 - D6 2026-09-01 [recovery, user] wake detection = wall-clock polling (2s tick, 15s jump threshold),
   cross-platform; native WM_POWERBROADCAST deferred as follow-up.
 
+- D7 2026-09-01 [recovery, user] add a dedicated network-change detector: poll `net.Interfaces()` every 5s,
+  signature of non-loopback interfaces (name + up/running + sorted addrs), restart via `ensureRestart`.
+- D8 2026-09-01 [recovery, user] network change = interface up/down OR IP change (not just IP); loopback filtered;
+  deterministic sorted signature (no false triggers from OS slice order).
+- D9 2026-09-01 [recovery, user] 30s cooldown between network-triggered restarts (anti-storm); budget NOT reset
+  on network change (flapping must burn the 8-attempt budget).
+
 - (none yet)
 
 ## Archive (dead decisions — kept greppable, never loaded into working context)

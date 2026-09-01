@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.10.0"
+const AppVersion = "0.2.11.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,10 @@ type App struct {
 	wakeStop   chan struct{}
 	restartMu  sync.Mutex
 	restarting bool
+
+	// Монитор смены сети
+	netStop          chan struct{}
+	lastNetRestartAt time.Time // под tunnelMu: кулдаун между сетевыми перезапусками
 
 	// Закрытие
 	closeAllowed atomic.Bool
@@ -270,6 +274,10 @@ func (a *App) startup(ctx context.Context) {
 	// Следим за выходом из сна — при пробуждении перезапускаем туннель.
 	a.wakeStop = make(chan struct{})
 	go a.startWakeMonitor(a.wakeStop, a.onWake)
+
+	// Следим за сменой сети — при изменении интерфейсов перезапускаем туннель.
+	a.netStop = make(chan struct{})
+	go a.startNetMonitor(a.netStop)
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
@@ -442,6 +450,10 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.wakeStop != nil {
 		close(a.wakeStop)
 		a.wakeStop = nil
+	}
+	if a.netStop != nil {
+		close(a.netStop)
+		a.netStop = nil
 	}
 	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
@@ -779,6 +791,9 @@ func (a *App) onRulesetProgress(stage string, pct int) {
 // ── Tunnel API ────────────────────────────────────────────────────────────────
 
 func (a *App) log(msg, lv string) {
+	if a.ctx == nil {
+		return
+	}
 	ts := time.Now().Format("15:04:05")
 	runtime.EventsEmit(a.ctx, "log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
