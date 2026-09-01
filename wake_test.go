@@ -66,14 +66,14 @@ func TestShouldHaltRestarts(t *testing.T) {
 
 func TestOnWakeGuards(t *testing.T) {
 	// Остановленный туннель — перезапуск не должен произойти.
-	stopped := &App{}
+	stopped := &App{cfg: Config{AutoRestoreOnWake: true}}
 	stopped.onWake()
 	if stopped.restarting {
 		t.Fatal("stopped tunnel should not restart")
 	}
 
 	// На паузе — перезапуск не должен произойти.
-	paused := &App{tunnelRunning: true, tunnelPaused: true}
+	paused := &App{tunnelRunning: true, tunnelPaused: true, cfg: Config{AutoRestoreOnWake: true}}
 	paused.onWake()
 	if paused.restarting {
 		t.Fatal("paused tunnel should not restart")
@@ -81,6 +81,7 @@ func TestOnWakeGuards(t *testing.T) {
 
 	// Сброс счётчиков при пробуждении работающего туннеля.
 	running := &App{tunnelRunning: true, tunnelPaused: false,
+		cfg: Config{AutoRestoreOnWake: true},
 		floodCount: 4, mismatchCount: 5, refusedCount: 400, wrapTimeoutCount: 2, restartAttempts: 7}
 	running.tunnelMu.Lock()
 	running.resetWakeCountersLocked()
@@ -88,6 +89,23 @@ func TestOnWakeGuards(t *testing.T) {
 	if running.floodCount != 0 || running.mismatchCount != 0 || running.refusedCount != 0 ||
 		running.wrapTimeoutCount != 0 || running.restartAttempts != 0 {
 		t.Fatalf("counters not reset on wake: %+v", running)
+	}
+}
+
+func TestOnWakeDisabled(t *testing.T) {
+	// Автовосстановление выключено — пробуждение не должно сбрасывать счётчики
+	// и не должно запускать перезапуск.
+	a := &App{tunnelRunning: true, tunnelPaused: false,
+		cfg:           Config{AutoRestoreOnWake: false},
+		floodCount: 4, restartAttempts: 7}
+	a.onWake()
+	a.tunnelMu.Lock()
+	defer a.tunnelMu.Unlock()
+	if a.floodCount == 0 || a.restartAttempts == 0 {
+		t.Fatal("disabled wake restore must not touch counters")
+	}
+	if a.restarting {
+		t.Fatal("disabled wake restore must not restart")
 	}
 }
 

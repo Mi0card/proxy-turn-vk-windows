@@ -23,6 +23,8 @@
   deterministic sorted signature (no false triggers from OS slice order).
 - D9 2026-09-01 [recovery, user] 30s cooldown between network-triggered restarts (anti-storm); budget NOT reset
   on network change (flapping must burn the 8-attempt budget).
+- D10 2026-09-01 [recovery, user] wake & network-change auto-restore are optional (settings checkboxes), but
+  default ENABLED — missing config keys / missing file keep current behavior (defaults set pre-unmarshal).
 
 - (none yet)
 

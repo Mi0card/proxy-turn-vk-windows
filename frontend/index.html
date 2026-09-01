@@ -548,6 +548,17 @@ PersistentKeepalive = 25
           </label>
         </div>
         <div class="card">
+          <h3 class="settings-title">Автовосстановление соединения</h3>
+          <label class="tray-option" title="После выхода компьютера из сна туннель будет перезапущен автоматически">
+            <input type="checkbox" id="auto-restore-wake" onchange="saveConfig()">
+            <span>Перезапускать туннель после выхода из сна</span>
+          </label>
+          <label class="tray-option" title="При смене сети (Wi-Fi → Ethernet, переподключение и т.п.) туннель будет перезапущен автоматически">
+            <input type="checkbox" id="auto-restore-net" onchange="saveConfig()">
+            <span>Перезапускать туннель при смене сети</span>
+          </label>
+        </div>
+        <div class="card">
           <h3 class="settings-title">Импорт / Экспорт</h3>
           <p class="hint hint--spaced">Экспорт сохраняет все настройки в JSON-файл для резервной копии или переноса на другой компьютер. Импорт полностью заменяет текущую конфигурацию.</p>
           <div class="btn-row">

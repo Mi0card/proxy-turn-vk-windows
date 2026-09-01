@@ -270,6 +270,11 @@ function loadConfig(cfg) {
   if (mtr && cfg.tray_on_exit !== undefined) mtr.checked = !!cfg.tray_on_exit;
   const mtm = document.getElementById('minimize-tray-on-min');
   if (mtm && cfg.tray_on_minimize !== undefined) mtm.checked = !!cfg.tray_on_minimize;
+  // Автовосстановление: undefined → включаем (поведение по умолчанию — включено).
+  const arw = document.getElementById('auto-restore-wake');
+  if (arw) arw.checked = cfg.auto_restore_on_wake !== false;
+  const arn = document.getElementById('auto-restore-net');
+  if (arn) arn.checked = cfg.auto_restore_on_net_change !== false;
   toggleAuth();
 }
 
@@ -295,6 +300,8 @@ function collectConfig() {
     dns:             getVal('rr-dns') || '',
     tray_on_exit: document.getElementById('minimize-tray')?.checked || false,
     tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
+    auto_restore_on_wake: document.getElementById('auto-restore-wake')?.checked || false,
+    auto_restore_on_net_change: document.getElementById('auto-restore-net')?.checked || false,
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }

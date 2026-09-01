@@ -4,7 +4,7 @@
      Contradicts git log / the journal (a session died before END)? Trust git: rebuild this
      file from the last journal entry + `git log -5`, note the crash in the journal. -->
 
-Session: 1
+Session: 2
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
 Active: none
 Next: first real slice (user to pick from ISSUES or a brief); maintain.md when S10
@@ -18,4 +18,5 @@ Blocked: none
 - Full app build (build.ps1) needs Wails CLI + MSYS2 GCC — not installed on this box (unverified).
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
-- Bootstrap S1: repo adopted into harness; build/test/vet verified (root + engine cross-compile).
+- S2 wake auto-restart · S3 network-change auto-restart (pollers + bounded single-flight restart).
+- S4 both auto-restores optional: Config flags (default on) + «Автовосстановление соединения» checkboxes.

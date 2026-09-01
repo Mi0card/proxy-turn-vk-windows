@@ -144,7 +144,7 @@ func TestNetworkChangeAllowed(t *testing.T) {
 }
 
 func TestOnNetworkChangeCooldownStamp(t *testing.T) {
-	a := &App{tunnelRunning: true}
+	a := &App{tunnelRunning: true, cfg: Config{AutoRestoreOnNetChange: true}}
 	a.onNetworkChange()
 	a.tunnelMu.Lock()
 	stamp := a.lastNetRestartAt
@@ -156,5 +156,18 @@ func TestOnNetworkChangeCooldownStamp(t *testing.T) {
 		// после срабатывания последующий вызов сразу попал в кулдаун
 	} else {
 		t.Fatal("immediately after trigger must be in cooldown")
+	}
+}
+
+func TestOnNetworkChangeDisabled(t *testing.T) {
+	// Автовосстановление выключено — смена сети не должна трогать туннель
+	// и не должна штамповать кулдаун.
+	a := &App{tunnelRunning: true, cfg: Config{AutoRestoreOnNetChange: false}}
+	a.onNetworkChange()
+	a.tunnelMu.Lock()
+	stamp := a.lastNetRestartAt
+	a.tunnelMu.Unlock()
+	if !stamp.IsZero() {
+		t.Fatal("disabled net restore must not stamp cooldown")
 	}
 }

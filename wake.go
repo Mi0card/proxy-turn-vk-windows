@@ -67,6 +67,9 @@ func (a *App) startWakeMonitor(stop chan struct{}, onWake func()) {
 // onWake — реакция на выход из сна: перезапускаем туннель, если он работал
 // и не был поставлен на паузу. Свежий после сна бюджет перезапусков.
 func (a *App) onWake() {
+	if !a.getCfg().AutoRestoreOnWake {
+		return
+	}
 	a.tunnelMu.Lock()
 	running := a.tunnelRunning
 	paused := a.tunnelPaused

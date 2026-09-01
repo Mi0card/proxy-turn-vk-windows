@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.11.1"
+const AppVersion = "0.2.11.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,10 @@ type Config struct {
 	DNS            string          `json:"dns"`
 	TrayOnExit     bool            `json:"tray_on_exit"`
 	TrayOnMinimize bool            `json:"tray_on_minimize"`
+	// Автовосстановление соединения: перезапуск туннеля после выхода из сна
+	// и при смене сети. По умолчанию включено (см. loadConfig).
+	AutoRestoreOnWake      bool `json:"auto_restore_on_wake"`
+	AutoRestoreOnNetChange bool `json:"auto_restore_on_net_change"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -465,6 +469,13 @@ func (a *App) shutdown(ctx context.Context) {
 // ── Config API ────────────────────────────────────────────────────────────────
 
 func (a *App) loadConfig() {
+	// Дефолты автовосстановления — включено: старые конфиги (без этих ключей),
+	// свежий конфиг без полей и отсутствующий файл не должны молча менять
+	// поведение существующих пользователей. Присутствующие в файле ключи
+	// перезапишут эти значения ниже.
+	a.cfg.AutoRestoreOnWake = true
+	a.cfg.AutoRestoreOnNetChange = true
+
 	data, err := os.ReadFile(a.configFile)
 	if err != nil {
 		return

@@ -100,6 +100,9 @@ func (a *App) networkChangeAllowed() bool {
 // Бюджет перезапусков не сбрасывается (в отличие от wake): «мерцающая» сеть
 // должна сжечь лимит и привести к жёсткой остановке.
 func (a *App) onNetworkChange() {
+	if !a.getCfg().AutoRestoreOnNetChange {
+		return
+	}
 	if !a.networkChangeAllowed() {
 		return
 	}
