@@ -129,6 +129,11 @@ type App struct {
 	lastCBReset      int64 // unix ms последнего сброса circuit breaker
 	activeWorkers    int
 
+	// Автовосстановление: wake-монитор + single-flight перезапуска
+	wakeStop   chan struct{}
+	restartMu  sync.Mutex
+	restarting bool
+
 	// Закрытие
 	closeAllowed atomic.Bool
 
@@ -261,6 +266,10 @@ func (a *App) startup(ctx context.Context) {
 	// Следим за сворачиванием окна — при включённой опции прячем в трей.
 	a.minPollStop = make(chan struct{})
 	go a.watchMinimize()
+
+	// Следим за выходом из сна — при пробуждении перезапускаем туннель.
+	a.wakeStop = make(chan struct{})
+	go a.startWakeMonitor(a.wakeStop, a.onWake)
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
@@ -429,6 +438,10 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.minPollStop != nil {
 		close(a.minPollStop)
 		a.minPollStop = nil
+	}
+	if a.wakeStop != nil {
+		close(a.wakeStop)
+		a.wakeStop = nil
 	}
 	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
@@ -1228,17 +1241,17 @@ func (a *App) checkCircuitBreaker(line string) {
 	case strings.Contains(ll, "flood control"):
 		a.floodCount++
 		if a.floodCount >= 5 {
-			go a.handleCritical("⚠ Flood Control — VK ограничил IP. Подождите.")
+			go a.ensureRestart("⚠ Flood Control — VK ограничил IP. Перезапуск...")
 		}
 	case strings.Contains(ll, "ip mismatch"):
 		a.mismatchCount++
 		if a.mismatchCount >= 5 {
-			go a.handleCritical("⚠ IP Mismatch — IP изменился. Переподключитесь.")
+			go a.ensureRestart("⚠ IP Mismatch — IP изменился. Перезапуск...")
 		}
 	case strings.Contains(ll, "connection refused") || strings.Contains(ll, "i/o timeout"):
 		a.refusedCount++
 		if a.refusedCount >= 400 {
-			go a.handleCritical("⚠ 400+ таймаутов — нет сети. Отключение.")
+			go a.ensureRestart("⚠ 400+ таймаутов — нет сети. Перезапуск...")
 		}
 	case strings.Contains(ll, "wrap") && strings.Contains(ll, "timeout"):
 		a.wrapTimeoutCount++
@@ -1301,9 +1314,12 @@ func (a *App) watchdog(stop chan struct{}) {
 				time.Sleep(time.Duration(backoff) * time.Millisecond)
 				a.tunnelMu.Lock()
 				stillRunning := a.tunnelRunning
+				sameProc := a.tunnelProc == proc
 				a.tunnelMu.Unlock()
-				if stillRunning {
-					a.restartTunnel()
+				// sameProc: если за время бэкоффа уже случился перезапуск (wake/breaker) —
+				// не дублируем его, процесс под нашим наблюдением уже заменился.
+				if stillRunning && sameProc {
+					a.ensureRestart("⚠ Процесс упал. Перезапуск...")
 				}
 				return
 			}
@@ -1314,7 +1330,12 @@ func (a *App) watchdog(stop chan struct{}) {
 					zeroWorkersSince = time.Now().UnixMilli()
 				} else if time.Now().UnixMilli()-zeroWorkersSince > 90_000 {
 					a.log("⚠ Зомби-процесс (0 воркеров 90с). Перезапуск...", "warn")
-					a.restartTunnel()
+					a.tunnelMu.Lock()
+					sameProc := a.tunnelProc == proc
+					a.tunnelMu.Unlock()
+					if sameProc {
+						a.ensureRestart("Зомби-процесс (0 воркеров 90с)")
+					}
 					return
 				}
 			} else {
@@ -1369,10 +1390,14 @@ func (a *App) restartTunnel() {
 	a.tunnelStdin = nil
 	ps := a.pingStop
 	a.pingStop = nil
-	a.watchdogStop = nil // текущий watchdog — это мы сами, сейчас вернёмся сами
+	ws := a.watchdogStop
+	a.watchdogStop = nil
 	a.tunnelMu.Unlock()
 	if ps != nil {
 		close(ps) // останавливаем pingLoop старого процесса, иначе он утечёт
+	}
+	if ws != nil {
+		close(ws) // останавливаем старый watchdog — перезапуск может прийти не из него
 	}
 
 	// Перезапускаем с теми же параметрами
