@@ -26,7 +26,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.11.2"
+const AppVersion = "0.2.11.3"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -141,6 +141,9 @@ type App struct {
 	// Монитор смены сети
 	netStop          chan struct{}
 	lastNetRestartAt time.Time // под tunnelMu: кулдаун между сетевыми перезапусками
+
+	// Финализация туннеля: канал закрывается когда finalizeTunnel завершается.
+	finalizeDone chan struct{}
 
 	// Закрытие
 	closeAllowed atomic.Bool
@@ -400,6 +403,9 @@ func (a *App) quitApp() {
 		if tunnelActive {
 			a.log("Останавливаю туннель...", "warn")
 			a.tunnelSend("STOP")
+			a.tunnelMu.Lock()
+			done := a.finalizeDone
+			a.tunnelMu.Unlock()
 			for i := 0; i < 40; i++ {
 				time.Sleep(100 * time.Millisecond)
 				a.tunnelMu.Lock()
@@ -415,6 +421,14 @@ func (a *App) quitApp() {
 			a.tunnelMu.Unlock()
 			if still && proc != nil {
 				proc.Process.Kill()
+			}
+			// Ждём завершения finalizeTunnel (с таймаутом).
+			if done != nil {
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					a.log("finalizeTunnel timed out", "warn")
+				}
 			}
 			a.log("Туннель остановлен.", "warn")
 		}
@@ -971,6 +985,9 @@ func (a *App) TunnelStart(
 
 	// Читаем оба потока; финализируем только после того, как оба пайпа дочитаны
 	// до EOF (требование os/exec — нельзя звать Wait() во время чтения пайпов).
+	a.tunnelMu.Lock()
+	a.finalizeDone = make(chan struct{})
+	a.tunnelMu.Unlock()
 	var streamsWG sync.WaitGroup
 	streamsWG.Add(2)
 	go func() { defer streamsWG.Done(); a.readStream(stderr, startTs) }() // логи go_client
@@ -1196,6 +1213,15 @@ go func() {
 // restartTunnel: если пока читались завершающиеся пайпы старого процесса
 // watchdog уже запустил новый, эта финализация не должна затирать его состояние.
 func (a *App) finalizeTunnel(proc *exec.Cmd, startTs time.Time) {
+	defer func() {
+		a.tunnelMu.Lock()
+		if a.finalizeDone != nil {
+			close(a.finalizeDone)
+			a.finalizeDone = nil
+		}
+		a.tunnelMu.Unlock()
+	}()
+
 	a.tunnelMu.Lock()
 	if !a.tunnelRunning || a.tunnelProc != proc { // уже финализировано или это уже другой (перезапущенный) процесс
 		a.tunnelMu.Unlock()
@@ -1481,6 +1507,7 @@ func (a *App) TunnelStop() {
 	a.tunnelSend("STOP")
 	a.tunnelMu.Lock()
 	proc := a.tunnelProc
+	done := a.finalizeDone
 	a.tunnelMu.Unlock()
 
 	if proc != nil {
@@ -1494,6 +1521,16 @@ func (a *App) TunnelStop() {
 			proc.Process.Kill()
 		}
 	}
+
+	// Ждём завершения finalizeTunnel (с таймаутом).
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			a.log("finalizeTunnel timed out", "warn")
+		}
+	}
+
 	// Останавливаем WireGuard userspace устройство
 	StopWGTunnel()
 }

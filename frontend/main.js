@@ -1261,9 +1261,9 @@ function renderRuleSuggest() {
   if (filteredGeosite.length > 0) {
     html += `<div class="rr-suggest-head">geosite</div>`;
     filteredGeosite.forEach((group, index) => {
-      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geosite" data-value="${group}">
+      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geosite" data-value="${escAttr(group)}">
         <span class="rr-type">geosite-</span>
-        ${group.substring(8)}
+        ${escHtml(group.substring(8))}
       </div>`;
     });
   }
@@ -1271,9 +1271,9 @@ function renderRuleSuggest() {
   if (filteredGeoip.length > 0) {
     html += `<div class="rr-suggest-head">geoip</div>`;
     filteredGeoip.forEach((group, index) => {
-      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geoip" data-value="${group}">
+      html += `<div class="rr-suggest-item" data-index="${index}" data-type="geoip" data-value="${escAttr(group)}">
         <span class="rr-type">geoip-</span>
-        ${group.substring(6)}
+        ${escHtml(group.substring(6))}
       </div>`;
     });
   }
@@ -1286,7 +1286,7 @@ function renderRuleSuggest() {
   if (filteredInline.length > 0) {
     html += `<div class="rr-suggest-head">встроенные (без скачивания)</div>`;
     filteredInline.forEach(example => {
-      html += `<div class="rr-suggest-item" data-type="inline" data-value="${escHtml(example)}">
+      html += `<div class="rr-suggest-item" data-type="inline" data-value="${escAttr(example)}">
         <span class="rr-type">${escHtml(example.split(':')[0] + ':')}</span>
         ${escHtml(example.split(':').slice(1).join(':'))}
       </div>`;
@@ -1829,6 +1829,10 @@ async function pasteInput(id) {
 
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escAttr(s) {
+  return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── Help text ─────────────────────────────────────────────────────────────────

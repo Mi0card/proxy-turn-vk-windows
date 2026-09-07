@@ -274,12 +274,29 @@ type ProxyServer struct {
 	rulesetMgr    *RulesetManager
 	defaultPolicy string
 
+	// Transport pool — один на каждый тип маршрутизации (конкурентно-безопасный).
+	transportDirect *http.Transport // для PolicyDirect (прямое соединение)
+	transportTunnel *http.Transport // для PolicyProxy  (через туннель)
+
 	active int32 // атомарный счётчик активных соединений
 	total  int32 // всего соединений за сессию
 }
 
 func NewProxyServer(logFn func(msg, lv string), statsFn func(ProxyStats)) *ProxyServer {
-	return &ProxyServer{logFn: logFn, statsFn: statsFn}
+	return &ProxyServer{
+		logFn:   logFn,
+		statsFn: statsFn,
+		transportDirect: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return net.DialTimeout(network, addr, 30*time.Second)
+			},
+		},
+		transportTunnel: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return wgDialStrict(network, addr)
+			},
+		},
+	}
 }
 
 // SetRulesets задаёт текущий список правил маршрутизации.
@@ -719,10 +736,11 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	if route.policy == PolicyDirect {
 		via = "напрямую"
 	}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return p.dialForRoute(route.policy, network, addr)
-		},
+	var transport *http.Transport
+	if route.policy == PolicyDirect {
+		transport = p.transportDirect
+	} else {
+		transport = p.transportTunnel
 	}
 	resp, err := transport.RoundTrip(r)
 	if err != nil {
