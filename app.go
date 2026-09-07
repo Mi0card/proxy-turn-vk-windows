@@ -985,9 +985,7 @@ func (a *App) TunnelStart(
 
 	// Читаем оба потока; финализируем только после того, как оба пайпа дочитаны
 	// до EOF (требование os/exec — нельзя звать Wait() во время чтения пайпов).
-	a.tunnelMu.Lock()
 	a.finalizeDone = make(chan struct{})
-	a.tunnelMu.Unlock()
 	var streamsWG sync.WaitGroup
 	streamsWG.Add(2)
 	go func() { defer streamsWG.Done(); a.readStream(stderr, startTs) }() // логи go_client
