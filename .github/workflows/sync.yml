@@ -15,6 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          ref: dev
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fetch upstream
@@ -46,6 +47,31 @@ jobs:
             && echo "changed=false" >> $GITHUB_OUTPUT \
             || echo "changed=true"  >> $GITHUB_OUTPUT
 
+      # Хард-проверка сборки перед открытием PR: слой обязан компилироваться
+      # и под Windows (go_client), и под Linux (server_src). Если сборка
+      # падает — workflow умирает, PR не создаётся, сломанный sync не уйдёт.
+      - name: Setup Go
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Build go_client (windows)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          cd go_client
+          GOOS=windows go build ./...
+          rm -f wg-turn-client
+          cd ..
+
+      - name: Build server_src (linux)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          cd server_src
+          GOOS=linux go build ./...
+          rm -f wg-turn-client
+          cd ..
+
       - name: Get upstream version
         id: ver
         run: |
@@ -63,6 +89,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          base: dev
           branch: sync/upstream
           title: "sync: upstream SpaceNeuroX ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
           body: |
