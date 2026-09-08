@@ -20,27 +20,29 @@ jobs:
       - name: Fetch upstream
         run: |
           git clone --depth=1 \
-            https://github.com/amurcanov/proxy-turn-vk-android.git upstream
+            https://github.com/SpaceNeuroX/proxy-turn-vk-android.git upstream
 
       - name: Sync go_client
         run: |
           rm -rf go_client
-          cp -r upstream/app/src/main/assets/android-client ./go_client
+          cp -r upstream/go_client ./go_client
 
       - name: Sync server_src
         run: |
           rm -rf server_src
-          cp -r upstream/app/src/main/assets/linux-server ./server_src
+          cp -r upstream/server ./server_src
 
-      - name: Sync deploy.sh
-        run: |
-          mkdir -p assets
-          cp upstream/app/src/main/assets/deploy.sh ./assets/deploy.sh
+      # Локальный слой (fingerprint-переключение + Windows-build-фиксы)
+      # пере-накладывается поверх свежего go_client/ из upstream. Патч + источник
+      # правды в .agent/local/go-client-local/. git apply внутри жёстко падает
+      # при дрейфе — слой нельзя потерять молча.
+      - name: Re-apply local go_client layer
+        run: bash .agent/local/go-client-local/apply.sh
 
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet go_client/ server_src/ assets/deploy.sh \
+          git diff --quiet go_client/ server_src/ \
             && echo "changed=false" >> $GITHUB_OUTPUT \
             || echo "changed=true"  >> $GITHUB_OUTPUT
 
@@ -62,18 +64,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: sync/upstream
-          title: "sync: upstream amurcanov ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
+          title: "sync: upstream SpaceNeuroX ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
           body: |
             Автоматический синк из upstream репозитория.
 
             **Перед мержем обязательно проверьте изменения вручную.**
 
             Обновлено:
-            - `go_client/` — туннельный движок (`app/src/main/assets/android-client`)
-            - `server_src/` — серверная часть (`app/src/main/assets/linux-server`)
-            - `assets/deploy.sh` — установочный скрипт VPS
+            - `go_client/` — туннельный движок (`go_client`)
+            - `server_src/` — серверная часть (`server`)
+            - Локальный слой (fingerprint-переключение + Windows-build-фиксы)
+              пере-наложен поверх свежего движка (`.agent/local/go-client-local/`).
 
-            - Upstream: `amurcanov/proxy-turn-vk-android`
+            - Upstream: `SpaceNeuroX/proxy-turn-vk-android`
             - Версия: `${{ steps.ver.outputs.tag }}` (`${{ steps.ver.outputs.sha }}`)
           commit-message: "sync: upstream ${{ steps.ver.outputs.tag }} (${{ steps.ver.outputs.sha }})"
           delete-branch: true

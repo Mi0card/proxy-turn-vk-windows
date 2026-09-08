@@ -11,11 +11,12 @@ import (
 	"time"
 )
 
-const (
-	workersPerGroup  = 9
-	defaultCycleSecs = 36000
-)
+const workersPerGroup = 9
 
+const allocateGateInterval = 100 * time.Millisecond
+
+// WorkerGroup:
+// Запускает 9 потоков с одними кредами. Ротации нет — работает до смерти воркеров.
 func WorkerGroup(
 	ctx context.Context,
 	groupID int,
@@ -30,15 +31,14 @@ func WorkerGroup(
 	pauseFlag *int32,
 	deviceID, password string,
 	stats *Stats,
-	waitCreds <-chan struct{},
-	signalCreds chan<- struct{},
-	waitSpawn <-chan struct{},
-	signalSpawn chan<- struct{},
+	waitReady <-chan struct{},
+	signalReady chan<- struct{},
 ) {
-
-	if waitCreds != nil {
+	// Каскадный запуск: ждем свою очередь
+	if waitReady != nil {
+		log.Printf("[ГРУППА #%d] Ожидание сигнала от предыдущей группы...", groupID)
 		select {
-		case <-waitCreds:
+		case <-waitReady:
 		case <-ctx.Done():
 			return
 		}
@@ -49,6 +49,7 @@ func WorkerGroup(
 		configSent = 1
 	}
 
+	// Doze-mode пауза
 	for atomic.LoadInt32(pauseFlag) != 0 {
 		if ctx.Err() != nil {
 			return
@@ -93,6 +94,9 @@ func WorkerGroup(
 		}
 
 		getStreamCache(credStreamID).invalidate(credStreamID)
+		if getVkAuthMode() == "account" {
+			invalidateInjectedTurnCreds(hash)
+		}
 		u, p, urls, refreshErr := GetCreds(ctx, hash, credStreamID)
 		if refreshErr != nil {
 			log.Printf("[TURN] Не удалось обновить креды после %s: %v", reason, refreshErr)
@@ -107,26 +111,42 @@ func WorkerGroup(
 		return true
 	}
 
-	if signalCreds != nil {
+	// Сигнализируем следующей группе, что мы успешно запустились (креды получены + фора)
+	if signalReady != nil {
 		go func() {
-			time.Sleep(2 * time.Second)
-			close(signalCreds)
+			delayMs := 500 + rand.Intn(250)
+			time.Sleep(time.Duration(delayMs) * time.Millisecond)
+			close(signalReady)
+			log.Printf("[ГРУППА #%d] Успешный старт! Передача эстафеты следующей группе...", groupID)
 		}()
 	}
 
-	if waitSpawn != nil {
-		select {
-		case <-waitSpawn:
-		case <-ctx.Done():
-			return
-		}
-	}
+	// Общий rate-limit на TURN Allocate по всей группе: не более одной новой
+	// аллокации за тик, независимо от того, сколько воркеров сейчас готовы
+	// её выполнить (стартовый stagger — отдельная вещь, см. workerDelay ниже —
+	// он размазывает старт горутин, но не сами ретраи Allocate внутри уже
+	// запущенных). Без этого на нестабильной сети несколько воркеров всё
+	// равно накладываются друг на друга и вместе выжигают VK-квоту (error
+	// 486) быстрее, чем должны. См. RunSession(allocateGate) в session.go и
+	// комментарий там про free-turn-proxy — тот же приём.
+	allocateTicker := time.NewTicker(allocateGateInterval)
+	defer allocateTicker.Stop()
 
-	for _, wid := range workerIDs {
+	for i, wid := range workerIDs {
 		wg.Add(1)
 
-		go func(wid int) {
+		workerDelay := time.Duration(i) * 75 * time.Millisecond
+
+		go func(wid int, delay time.Duration) {
 			defer wg.Done()
+
+			if delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					return
+				}
+			}
 
 			shouldGetConfig := getConfig
 			attempt := 0
@@ -151,8 +171,10 @@ func WorkerGroup(
 				credsMu.RUnlock()
 
 				configDelivered, sessErr := RunSession(ctx, tp, peer, d, localPort,
-					getConf, cc, wid, &credsSnapshot, deviceID, password, stats)
+					getConf, cc, wid, &credsSnapshot, deviceID, password, stats, allocateTicker.C)
 
+				quotaRetry := false
+				fastRetry := false
 				if getConf {
 					if configDelivered {
 						atomic.StoreInt32(&configSent, 1)
@@ -167,19 +189,24 @@ func WorkerGroup(
 					}
 					errStr := sessErr.Error()
 					errStrLower := strings.ToLower(errStr)
+					fastRetry = strings.Contains(errStrLower, "broken pipe") ||
+						strings.Contains(errStrLower, "connection reset by peer") ||
+						strings.Contains(errStrLower, "unexpected eof")
 
 					turnAllocAttrMissing := strings.Contains(errStrLower, "turn allocate") &&
 						strings.Contains(errStrLower, "attribute not found")
-					turnCredRefreshNeeded := turnAllocAttrMissing ||
+					isTurnQuota := strings.Contains(errStrLower, "quota") || strings.Contains(errStr, "486")
+					quotaRetry = isTurnQuota
+					turnCredRefreshNeeded := !isTurnQuota && (turnAllocAttrMissing ||
 						strings.Contains(errStrLower, "turn allocate auth") ||
 						strings.Contains(errStrLower, "invalid credential") ||
 						strings.Contains(errStrLower, "stale nonce") ||
 						strings.Contains(errStrLower, "allocation mismatch") ||
-						strings.Contains(errStrLower, "error 508") ||
-						strings.Contains(errStrLower, "turn квота") ||
-						strings.Contains(errStrLower, "quota")
+						strings.Contains(errStrLower, "error 508"))
 
-					if strings.Contains(errStrLower, "rate limit") ||
+					if hint := workerErrorHint(sessErr); hint != "" {
+						errStr += " | " + hint
+					} else if strings.Contains(errStrLower, "rate limit") ||
 						strings.Contains(errStrLower, "flood control") ||
 						strings.Contains(errStrLower, "ip mismatch") ||
 						strings.Contains(errStrLower, "error 29") {
@@ -193,7 +220,9 @@ func WorkerGroup(
 					}
 
 					attempt++
-					if turnAllocAttrMissing {
+					if isTurnQuota {
+						log.Printf("[ВОРКЕР #%d] [TURN] Квота relay исчерпана (один аккаунт VK = мало слотов), ждём: %s", wid, errStr)
+					} else if turnAllocAttrMissing {
 						log.Printf("[ВОРКЕР #%d] [TURN] Allocate вернул неполный ответ, обновляем TURN-креды и повторяем (попытка %d): %s", wid, attempt, errStr)
 						refreshCreds("TURN Allocate attribute-not-found")
 					} else if turnCredRefreshNeeded {
@@ -203,6 +232,7 @@ func WorkerGroup(
 						log.Printf("[ВОРКЕР #%d] Ошибка (попытка %d): %s", wid, attempt, errStr)
 					}
 
+					// Если ошибка STUN (credentials invalid), воркер не сможет переподключиться. Завершаем.
 					isStunDeath := strings.Contains(errStrLower, "error 29") ||
 						strings.Contains(errStrLower, "cannot create socket")
 
@@ -217,25 +247,25 @@ func WorkerGroup(
 				}
 
 				retryDelay := time.Duration(5+rand.Intn(11)) * time.Second
+				if quotaRetry {
+					retryDelay = time.Duration(30+rand.Intn(31)) * time.Second
+				} else if fastRetry {
+					retryDelay = time.Duration(1+rand.Intn(3)) * time.Second
+				}
 				select {
 				case <-time.After(retryDelay):
 				case <-ctx.Done():
 					return
 				}
 			}
-		}(wid)
-
-		time.Sleep(200 * time.Millisecond)
-	}
-
-	if signalSpawn != nil {
-		close(signalSpawn)
+		}(wid, workerDelay)
 	}
 
 	wg.Wait()
 	log.Printf("[ГРУППА #%d] Все воркеры группы завершились.", groupID)
 }
 
+// ParseHashes — парсит строку хешей
 func ParseHashes(raw string) []string {
 	var result []string
 	seen := make(map[string]struct{})
@@ -273,14 +303,28 @@ func normalizeVKJoinHash(input string) string {
 	return strings.Trim(strings.TrimSpace(s), "/")
 }
 
+// TurnParams — конфигурация TURN
 type TurnParams struct {
 	Host     string
 	Port     string
 	Hashes   []string
-	WrapKey  []byte
-	ObfsMode string
+	WrapKey  []byte // Password-derived WRAP key (32 bytes), nil = disabled
+	ObfsMode string // "audio" or "video" — RTP masking mode
+	// NoDTLS: пропустить DTLS и идти RTP-obfs AEAD напрямую поверх TURN relay.
+	// Требует сервер, который умеет принимать прямые (без DTLS) сессии на
+	// отдельном порту/слушателе — см. server/main.go -listen-direct.
+	NoDTLS bool
+	// RawMode: raw-IP без WireGuard (см. server/main.go -listen-raw, handleConnRaw).
+	// Подразумевает NoDTLS — сервер на -listen-raw DTLS не понимает.
+	RawMode bool
+	// TCPTransport: соединяться с TURN-relay по TCP вместо UDP (см.
+	// dialTURNConn в session.go). На некоторых сетях (замечено на
+	// Ростелекоме) UDP до TURN душится/дропается провайдером агрессивнее,
+	// чем TCP на тот же relay — этот флаг обходит именно это.
+	TCPTransport bool
 }
 
+// Credentials — учетные данные TURN
 type Credentials struct {
 	User          string
 	Pass          string

@@ -130,6 +130,12 @@ jobs:
           path: assets/server/wdtt-server
           key: wdtt-server-${{ hashFiles('server_src/**') }}
 
+      # Восстанавливаем локальный слой (fingerprint + Windows-build-фиксы) поверх
+      # go_client/, если дерево вдруг пришло без него (свежий форк/мануальный сброс).
+      - name: Re-apply local go_client layer
+        shell: bash
+        run: bash .agent/local/go-client-local/apply.sh
+
       - name: Cache wdtt-client.exe binary
         id: cache-client
         uses: actions/cache@v5

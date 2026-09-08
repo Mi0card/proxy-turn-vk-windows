@@ -14,7 +14,6 @@ import (
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
-	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/google/uuid"
 )
 
@@ -140,14 +139,14 @@ func getVKCredsViaVKCallsPath(ctx context.Context, link string, streamID int) (s
 
 	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(),
 		tlsclient.WithTimeoutSeconds(20),
-		tlsclient.WithClientProfile(profiles.Chrome_146),
+		tlsclient.WithClientProfile(tlsProfileForFingerprint()),
 		tlsclient.WithCookieJar(tlsclient.NewCookieJar()),
 	)
 	if err != nil {
 		return "", "", nil, newVKCallsFailure("setup", vkCallsFailureSetup, fmt.Errorf("create tls client: %w", err))
 	}
 
-	log.Printf("[STREAM %d] [VKCalls] Identity - Name: %s | device_id=%s | TLS=Chrome_146 | UA: %s", streamID, name, deviceID, profile.UserAgent)
+	log.Printf("[STREAM %d] [VKCalls] Identity - Name: %s | device_id=%s | Fingerprint=%s | UA: %s", streamID, name, deviceID, GetActiveFingerprint(), profile.UserAgent)
 
 	doRequest := func(step string, url string) (map[string]interface{}, error) {
 		req, err := fhttp.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(nil))

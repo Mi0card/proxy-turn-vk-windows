@@ -3,10 +3,17 @@
 # Cap 50 active lines; maintain.md moves superseded/expired ones to the Archive section.
 # Format: `D<n> <YYYY-MM-DD> [scope] decision — why. (Supersedes D<m>.)`
 
+- D13 2026-09-08 [engine, user] local go_client layer is the ONLY carved-out delta over upstream
+  go_client/ — fingerprint switching (-fingerprint) + GOOS=windows build fixes; source of truth in
+  `.agent/local/go-client-local/` (patch + apply.sh), re-applied by sync/build via `git apply`
+  (fail-loud on drift). All other engine edits remain upstream fixes. (Relaxes D2.)
+- D12 2026-09-08 [upstream, user] upstream = SpaceNeuroX/proxy-turn-vk-android (active, GPLv3);
+  amurcanov archived; amurcanov/csqtt NOT viable (Rust rewrite + PolyForm Noncommercial). (Supersedes D2 "amurcanov".)
+- D11 2026-09-08 [upstream, user] fingerprint-layer lands INSIDE the sync PR: apply.sh runs in sync.yml
+  before diff/PR so the reapplied feature is visible for review in the same PR.
+
 - D1 2026-09-01 [stack, observed] Wails v2 + vanilla JS/HTML/CSS frontend, WireGuard userspace over
   gvisor netstack, no admin rights anywhere — engine (go_client/server_src) auto-synced from upstream.
-- D2 2026-09-01 [engine, observed] `go_client/` & `server_src/` are separate Go modules synced from
-  amurcanov/proxy-turn-vk-android — local edits are overwritten; bugs there are upstream fixes.
 - D3 2026-09-01 [build, observed] engine/CI builds pin GOPROXY=goproxy.io,direct (slow default proxy
   on this box); build.ps1 and build.yml share the same 3-stage build (client → server → wails).
 

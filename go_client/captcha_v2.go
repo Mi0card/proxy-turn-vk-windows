@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	mathrand "math/rand"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,8 +28,8 @@ import (
 
 const (
 	captchaV2APIVersion    = "5.131"
-	captchaV2ScriptVersion = "1.1.1370"
-	captchaV2DeviceInfo    = `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1040,"innerWidth":1920,"innerHeight":970,"devicePixelRatio":1,"language":"ru-RU","languages":["ru-RU","ru","en-US","en"],"webdriver":false,"hardwareConcurrency":8,"notificationsPermission":"default"}`
+	captchaV2ScriptVersion = "1.1.1324"
+	captchaV2DeviceInfo    = `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1080,"innerWidth":1920,"innerHeight":951,"devicePixelRatio":1,"language":"en-US","languages":["en-US","en"],"webdriver":false,"hardwareConcurrency":8,"notificationsPermission":"denied"}`
 )
 
 var (
@@ -39,10 +40,12 @@ var (
 	reCaptchaV2DebugInfo  = regexp.MustCompile(`debug_info:(?:[^"]*\|\|)?"([a-fA-F0-9]{64})"`)
 	reCaptchaV2Version    = regexp.MustCompile(`vkid/([0-9.]*)/not_robot_captcha\.js`)
 
-	errCaptchaV2RateLimit = errors.New("captcha session rate limit reached")
-	errCaptchaV2Bot       = errors.New("captcha bot challenge")
+	errCaptchaV2RateLimit      = errors.New("captcha session rate limit reached")
+	errCaptchaV2Bot            = errors.New("captcha bot challenge")
+	errCaptchaSessionExpired     = errors.New("captcha session expired, need fresh challenge")
 
-	captchaV2MaxAttempts = 10
+	captchaV2MaxAttempts = 2
+	captchaV2MaxSliderChecks = 2
 
 	captchaV2DebugCache  sync.Map // scriptURL -> string
 	captchaV2HeaderOrder = []string{
@@ -102,20 +105,12 @@ func (e *captchaV2ShowTypeError) Error() string {
 }
 
 type captchaV2Session struct {
-	ctx          context.Context
-	client       tlsclient.HttpClient
-	profile      Profile
-	savedProfile *SavedProfile
-}
-
-func solveVkCaptchaV2(
-	ctx context.Context,
-	captchaErr *VkCaptchaError,
-	client tlsclient.HttpClient,
-	profile Profile,
-	savedProfile *SavedProfile,
-) (string, error) {
-	return solveVkCaptchaV2Attempts(ctx, captchaErr, client, profile, savedProfile, captchaV2MaxAttempts)
+	ctx              context.Context
+	client           tlsclient.HttpClient
+	profile          Profile
+	savedProfile     *SavedProfile
+	variedDeviceJSON string
+	domain           string
 }
 
 func solveVkCaptchaV2Attempts(
@@ -130,22 +125,27 @@ func solveVkCaptchaV2Attempts(
 		return "", fmt.Errorf("no session_token in redirect_uri")
 	}
 	if maxAttempts < 1 {
-		maxAttempts = 10
+		maxAttempts = 1
 	}
 	log.Printf("[КАПЧА] Решаю VK Smart Captcha автоматически (v2, попыток=%d)...", maxAttempts)
 
-	s := &captchaV2Session{ctx: ctx, client: client, profile: profile, savedProfile: savedProfile}
+	s := &captchaV2Session{
+		ctx:          ctx,
+		client:       client,
+		profile:      profile,
+		savedProfile: savedProfile,
+		domain:       captchaDomainFromRedirectURI(captchaErr.RedirectURI),
+	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		rotateCaptchaV2Identity(s, savedProfile)
 		token, solveErr := s.solveOnce(captchaErr)
 		if solveErr == nil {
 			return token, nil
 		}
 		log.Printf("[КАПЧА] v2 попытка %d ошибка: %v", attempt, solveErr)
 		if errors.Is(solveErr, errCaptchaV2RateLimit) {
-			log.Printf("[КАПЧА] Превышен лимит сессии капчи. Ожидаю 5 секунд...")
-			time.Sleep(5 * time.Second)
-			continue
+			return "", solveErr
 		}
 
 		backoffSteps := attempt
@@ -157,7 +157,7 @@ func solveVkCaptchaV2Attempts(
 		case <-ctx.Done():
 			timer.Stop()
 			return "", ctx.Err()
-		case <-time.After(time.Duration(1500+mathrand.Intn(1200)) * time.Millisecond):
+		case <-timer.C:
 		}
 	}
 	return "", fmt.Errorf("v2 captcha attempts exhausted (%d)", maxAttempts)
@@ -196,17 +196,21 @@ func (s *captchaV2Session) solveOnce(captchaErr *VkCaptchaError) (string, error)
 	}
 	log.Printf("[КАПЧА] v2 pow solved")
 
-	base := captchaV2BaseValues(captchaErr.SessionToken)
+	base := captchaV2BaseValues(captchaErr.SessionToken, s.domain)
 	if _, settingsErr := s.captchaRequest("captchaNotRobot.settings", base); settingsErr != nil {
 		return "", fmt.Errorf("captcha settings failed: %w", settingsErr)
 	}
 
-	browserFP, err := captchaV2BrowserFP()
-	if err != nil {
-		return "", err
+	browserFP := ""
+	if s.savedProfile != nil {
+		browserFP = strings.TrimSpace(s.savedProfile.BrowserFp)
 	}
-	if s.savedProfile != nil && strings.TrimSpace(s.savedProfile.BrowserFp) != "" {
-		browserFP = s.savedProfile.BrowserFp
+	if browserFP == "" {
+		var err error
+		browserFP, err = captchaV2BrowserFP()
+		if err != nil {
+			return "", err
+		}
 	}
 
 	if m := reCaptchaV2Version.FindStringSubmatch(page.ScriptURL); len(m) > 1 {
@@ -256,13 +260,146 @@ func (s *captchaV2Session) solveOnce(captchaErr *VkCaptchaError) (string, error)
 	return token, nil
 }
 
-func captchaV2BaseValues(sessionToken string) [][2]string {
+func captchaV2BaseValues(sessionToken, domain string) [][2]string {
 	return [][2]string{
 		{"session_token", sessionToken},
-		{"domain", "vk.com"},
+		{"domain", domain},
 		{"adFp", ""},
 		{"access_token", ""},
 	}
+}
+
+func captchaDomainFromRedirectURI(redirectURI string) string {
+	const fallback = "vk.com"
+	parsed, err := url.Parse(redirectURI)
+	if err != nil {
+		return fallback
+	}
+	domain := strings.TrimSpace(parsed.Query().Get("domain"))
+	if domain == "" {
+		return fallback
+	}
+	return domain
+}
+
+func isCaptchaSessionDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "getcontent status:") ||
+		strings.Contains(msg, "error_limit")
+}
+
+func isCaptchaSessionExhausted(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errCaptchaV2RateLimit) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return isCaptchaSessionDead(err) ||
+		strings.Contains(msg, "rate limit")
+}
+
+func captchaV2DeviceJSON(savedProfile *SavedProfile) string {
+	if savedProfile != nil && strings.TrimSpace(savedProfile.DeviceJSON) != "" {
+		return savedProfile.DeviceJSON
+	}
+	return captchaV2DeviceInfo
+}
+
+func (s *captchaV2Session) deviceJSON() string {
+	if strings.TrimSpace(s.variedDeviceJSON) != "" {
+		return s.variedDeviceJSON
+	}
+	return captchaV2DeviceJSON(s.savedProfile)
+}
+
+// rotateCaptchaV2Identity — новый browser_fp, UA и device_json на каждую попытку v2.
+func rotateCaptchaV2Identity(s *captchaV2Session, base *SavedProfile) {
+	s.profile = getRandomProfile()
+	fp, err := captchaV2BrowserFP()
+	if err != nil {
+		log.Printf("[КАПЧА] v2 fp generate failed: %v", err)
+		return
+	}
+	if s.savedProfile == nil {
+		s.savedProfile = &SavedProfile{}
+	}
+	s.savedProfile.Profile = s.profile
+	s.savedProfile.BrowserFp = fp
+	s.variedDeviceJSON = captchaV2VariedDeviceJSON(captchaV2DeviceJSON(base))
+	short := fp
+	if len(short) > 8 {
+		short = fp[:8]
+	}
+	log.Printf("[КАПЧА] v2 identity rotated fp=%s... ua=%s", short, truncateUA(s.profile.UserAgent))
+}
+
+func truncateUA(ua string) string {
+	if len(ua) <= 48 {
+		return ua
+	}
+	return ua[:48] + "..."
+}
+
+func captchaV2VariedDeviceJSON(base string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(base), &m); err != nil {
+		return base
+	}
+	jitterInt := func(key string, delta int) {
+		v, ok := m[key].(float64)
+		if !ok {
+			return
+		}
+		n := int(v) + mathrand.Intn(delta*2+1) - delta
+		if n < 320 {
+			n = 320
+		}
+		m[key] = n
+	}
+	jitterInt("screenWidth", 18)
+	jitterInt("screenHeight", 24)
+	jitterInt("screenAvailWidth", 18)
+	jitterInt("screenAvailHeight", 24)
+	jitterInt("innerWidth", 18)
+	jitterInt("innerHeight", 20)
+	if dpr, ok := m["devicePixelRatio"].(float64); ok && mathrand.Intn(3) == 0 {
+		m["devicePixelRatio"] = dpr
+	} else {
+		opts := []float64{1, 1.25, 1.5, 2, 2.5, 3}
+		m["devicePixelRatio"] = opts[mathrand.Intn(len(opts))]
+	}
+	m["hardwareConcurrency"] = 4 + mathrand.Intn(5)
+	langs := [][]string{
+		{"ru-RU", "ru", "en-US"},
+		{"ru-RU", "ru"},
+		{"en-US", "en", "ru-RU"},
+	}
+	pick := langs[mathrand.Intn(len(langs))]
+	m["language"] = pick[0]
+	langArr := make([]any, len(pick))
+	for i, l := range pick {
+		langArr[i] = l
+	}
+	m["languages"] = langArr
+	perms := []string{"default", "denied", "granted"}
+	m["notificationsPermission"] = perms[mathrand.Intn(len(perms))]
+	out, err := json.Marshal(m)
+	if err != nil {
+		return base
+	}
+	return string(out)
+}
+
+func captchaV2AcceptLanguage(profile Profile) string {
+	if strings.Contains(profile.SecChUaMobile, "?1") {
+		return "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+	}
+	return "en-US,en;q=0.9"
 }
 
 func captchaV2BrowserFP() (string, error) {
@@ -375,7 +512,7 @@ func (s *captchaV2Session) performCaptchaCheck(
 ) (*captchaV2Check, error) {
 	values := [][2]string{
 		{"session_token", sessionToken},
-		{"domain", "vk.com"},
+		{"domain", s.domain},
 		{"adFp", ""},
 		{"accelerometer", "[]"},
 		{"gyroscope", "[]"},
@@ -428,13 +565,10 @@ func (s *captchaV2Session) solveCheckboxCaptcha(
 	hash string,
 	debugInfo string,
 ) (string, error) {
-	deviceJSON := captchaV2DeviceInfo
-	if s.savedProfile != nil && strings.TrimSpace(s.savedProfile.DeviceJSON) != "" {
-		deviceJSON = s.savedProfile.DeviceJSON
-	}
+	deviceJSON := s.deviceJSON()
 	if _, err := s.captchaRequest("captchaNotRobot.componentDone", [][2]string{
 		{"session_token", sessionToken},
-		{"domain", "vk.com"},
+		{"domain", s.domain},
 		{"adFp", ""},
 		{"browser_fp", browserFP},
 		{"device", deviceJSON},
@@ -446,7 +580,7 @@ func (s *captchaV2Session) solveCheckboxCaptcha(
 	select {
 	case <-s.ctx.Done():
 		return "", s.ctx.Err()
-	case <-time.After(time.Duration(400+mathrand.Intn(250)) * time.Millisecond):
+	case <-time.After(time.Duration(800+mathrand.Intn(500)) * time.Millisecond):
 	}
 
 	check, err := s.performCaptchaCheck(sessionToken, browserFP, hash, "{}", "[]", debugInfo)
@@ -472,7 +606,6 @@ func (s *captchaV2Session) solveCheckboxCaptcha(
 }
 
 func solveCaptchaPoWV2(ctx context.Context, input string, difficulty int) string {
-	time.Sleep(time.Duration(200+mathrand.Intn(300)) * time.Millisecond)
 	if input == "" || difficulty <= 0 {
 		return ""
 	}
@@ -592,15 +725,17 @@ func captchaV2StringifyAny(value any) string {
 	}
 }
 
+// applyBrowserProfileFhttp applies browser headers to fhttp requests
 func applyBrowserProfileFhttp(req *fhttp.Request, profile Profile) {
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", profile.UserAgent)
 	req.Header.Set("sec-ch-ua", profile.SecChUa)
 	req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
 	req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
-	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Accept-Language", captchaV2AcceptLanguage(profile))
 	req.Header.Set("DNT", "1")
 }
 
+// VkCaptchaError represents a VK captcha challenge
 type VkCaptchaError struct {
 	ErrorCode      int
 	ErrorMsg       string

@@ -101,7 +101,10 @@ Unattended (oneshot, CI): question budget spent up front; the `(assumed)` ledger
   rule-based routing, SSH VPS deploy, manual VK captcha in a native window. Educational project.
 - Stack: Go 1.23.1 root + Wails v2 (GUI) + vanilla JS/HTML/CSS; wireguard userspace + gvisor
   netstack. Engine modules `go_client/` (go 1.26) & `server_src/` (go 1.25, Linux-only) are
-  auto-synced from `amurcanov/proxy-turn-vk-android` — never edit them locally.
+  auto-synced from `SpaceNeuroX/proxy-turn-vk-android` — never edit them locally, EXCEPT the
+  carved-out local go_client layer re-applied after each sync from
+  `.agent/local/go-client-local/` (patch + apply.sh; fingerprint switching + Windows-build
+  fixes; idempotent, fail-loud on drift).
 - Commands — build: `.\build.ps1` (needs Wails CLI + MSYS2 GCC; unverified locally) ·
   compile/test root: `go build ./...`, `go test ./...` · lint: `go vet ./...` (no linter; gofmt)
   · engine: `cd go_client && go build ./...`, `cd server_src && GOOS=linux GOARCH=amd64 go build ./...`
