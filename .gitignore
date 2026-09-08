@@ -3,6 +3,7 @@ build/bin/
 wdtt-client.exe
 wdtt
 assets/server/wdtt-server
+go_client/wg-turn-client
 
 # Upstream clone (sync.yml)
 upstream/

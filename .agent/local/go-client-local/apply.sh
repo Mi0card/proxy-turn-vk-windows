@@ -3,8 +3,8 @@
 #
 # The layer carries the local deltas that must survive every upstream sync:
 #   1. fingerprint switching (-fingerprint flag + profile/TLS selection), and
-#   2. GOOS=windows build compatibility (SO_REUSEADDR listenUDP + TUN-fd
-#      unavailable on Windows).
+#   2. GOOS=windows build compatibility (listenUDP with retry + dynamic-port
+#      fallback, and TUN-fd unavailable on Windows).
 # Source of truth: this file + go-client-local.patch in this directory.
 # Upstream sync (sync.yml) wipes go_client/ (rm -rf + cp -r), so this script is
 # run right after the copy to bring the deltas back as a reviewable layer inside
