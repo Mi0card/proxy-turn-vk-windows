@@ -30,5 +30,6 @@ func listenUDP(addr string) (net.PacketConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bind dynamic port: %w", err)
 	}
+	log.Printf("[АВТО-ПОРТ] Слушаю на %s", conn.LocalAddr())
 	return conn, nil
 }

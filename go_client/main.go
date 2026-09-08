@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -318,9 +319,9 @@ func main() {
 	stopLocalConn := context.AfterFunc(ctx, func() { _ = localConn.Close() })
 	defer stopLocalConn()
 
-	_, localPort, _ := net.SplitHostPort(*listen)
-	if localPort == "" {
-		localPort = "9000"
+	localPort := "9000"
+	if ua, ok := localConn.LocalAddr().(*net.UDPAddr); ok && ua.Port > 0 {
+		localPort = strconv.Itoa(ua.Port)
 	}
 
 	numGroups := (*numW + workersPerGroup - 1) / workersPerGroup
@@ -343,7 +344,7 @@ func main() {
 	log.Printf("[КЛИЕНТ] TLS: %s fingerprint", GetActiveFingerprint())
 	log.Printf("[КЛИЕНТ] Воркеров: %d (групп: %d, по %d)", *numW, numGroups, workersPerGroup)
 	log.Printf("[КЛИЕНТ] Хешей: %d", len(hashes))
-	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", *listen, *peerAddr)
+	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", localConn.LocalAddr(), *peerAddr)
 	if *turnTCP {
 		log.Printf("[КЛИЕНТ] TURN-транспорт: TCP")
 	} else {

@@ -60,10 +60,10 @@ index 7b55f7f..e98cb5b 100644
  import (
 diff --git a/go_client/listen_windows.go b/go_client/listen_windows.go
 new file mode 100644
-index 0000000..8fcc36e
+index 0000000..d8a3af8
 --- /dev/null
 +++ b/go_client/listen_windows.go
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +//go:build windows
 +
 +package main
@@ -96,13 +96,22 @@ index 0000000..8fcc36e
 +	if err != nil {
 +		return nil, fmt.Errorf("bind dynamic port: %w", err)
 +	}
++	log.Printf("[АВТО-ПОРТ] Слушаю на %s", conn.LocalAddr())
 +	return conn, nil
 +}
 diff --git a/go_client/main.go b/go_client/main.go
-index 108af15..a0e396d 100644
+index 108af15..c416c30 100644
 --- a/go_client/main.go
 +++ b/go_client/main.go
-@@ -171,6 +171,7 @@ func main() {
+@@ -9,6 +9,7 @@ import (
+ 	"net"
+ 	"os"
+ 	"os/signal"
++	"strconv"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -171,6 +172,7 @@ func main() {
  	deviceID := flag.String("device-id", "unknown", "уникальный ID устройства")
  	connPassword := flag.String("password", "", "пароль подключения")
  	captchaMode := flag.String("captcha-mode", "auto", "режим обхода капчи (auto/wv/rjs)")
@@ -110,7 +119,7 @@ index 108af15..a0e396d 100644
  	vkAuthMode := flag.String("vk-auth", "anonymous", "режим VK авторизации (account/anonymous)")
  	vkAnonPath := flag.String("vk-anon-path", "vkcalls", "анонимный путь VK TURN (vkcalls/legacy)")
  	vkCredsFile := flag.String("vk-creds-file", "", "файл с TURN кредами от аккаунта VK")
-@@ -203,6 +204,7 @@ func main() {
+@@ -203,6 +205,7 @@ func main() {
  	activeCaptchaMode := setCaptchaMode(*captchaMode)
  	activeVkAuthMode := setVkAuthMode(*vkAuthMode)
  	activeVkAnonPath := setVkAnonPath(*vkAnonPath)
@@ -118,7 +127,20 @@ index 108af15..a0e396d 100644
  
  	if err := loadVkCredsFile(*vkCredsFile); err != nil {
  		log.Fatalf("[КЛИЕНТ] Ошибка чтения vk-creds-file: %v", err)
-@@ -338,7 +340,7 @@ func main() {
+@@ -316,9 +319,9 @@ func main() {
+ 	stopLocalConn := context.AfterFunc(ctx, func() { _ = localConn.Close() })
+ 	defer stopLocalConn()
+ 
+-	_, localPort, _ := net.SplitHostPort(*listen)
+-	if localPort == "" {
+-		localPort = "9000"
++	localPort := "9000"
++	if ua, ok := localConn.LocalAddr().(*net.UDPAddr); ok && ua.Port > 0 {
++		localPort = strconv.Itoa(ua.Port)
+ 	}
+ 
+ 	numGroups := (*numW + workersPerGroup - 1) / workersPerGroup
+@@ -338,10 +341,10 @@ func main() {
  
  	log.Println("[КЛИЕНТ] ═══════════════════════════════════════")
  	log.Printf("[КЛИЕНТ] VK Creds: 2 stable app_id с циклическим fallback")
@@ -126,7 +148,11 @@ index 108af15..a0e396d 100644
 +	log.Printf("[КЛИЕНТ] TLS: %s fingerprint", GetActiveFingerprint())
  	log.Printf("[КЛИЕНТ] Воркеров: %d (групп: %d, по %d)", *numW, numGroups, workersPerGroup)
  	log.Printf("[КЛИЕНТ] Хешей: %d", len(hashes))
- 	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", *listen, *peerAddr)
+-	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", *listen, *peerAddr)
++	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", localConn.LocalAddr(), *peerAddr)
+ 	if *turnTCP {
+ 		log.Printf("[КЛИЕНТ] TURN-транспорт: TCP")
+ 	} else {
 diff --git a/go_client/profiles.go b/go_client/profiles.go
 index a279d23..0c72b98 100644
 --- a/go_client/profiles.go
