@@ -1,5 +1,5 @@
-# deploy.sh выполняется на Linux VPS через bash — CRLF ломает исполнение
-# (invalid option name, $'\r': command not found и т.п.). Форсируем LF
-# независимо от платформы чекаута/git core.autocrlf на CI-раннере.
-*.sh text eol=lf
-assets/deploy.sh text eol=lf
+# Engine trees are upstream-mirrored; the local go_client layer (git apply) matches
+# LF contexts, so force LF on every OS — Windows CI checkouts must not turn them CRLF.
+go_client/** text eol=lf
+server_src/** text eol=lf
+.agent/local/** text eol=lf
