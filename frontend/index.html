@@ -100,13 +100,13 @@
       <!-- Подключение -->
       <section id="tab-connect" class="tab-panel active">
         <div class="card">
-          <div class="card-title">Быстрая вставка wdtt:// ссылки</div>
+          <div class="card-title">Быстрая вставка wdtt:// или qwdtt:// ссылки</div>
           <div class="row-flex">
-            <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash1,hash2">
+            <input id="wlink" type="text" class="inp mono" placeholder="wdtt://168.x.x.x:56000:56001:9000:secret:hash  или  qwdtt://config?peer=...&name=...&pass=...">
             <button class="icon-btn" onclick="pasteInput('wlink')" title="Вставить" aria-label="Вставить ссылку из буфера обмена">
               <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
             </button>
-            <button class="btn btn-primary" onclick="parseWdtt()" aria-label="Разобрать wdtt ссылку">Разобрать</button>
+            <button class="btn btn-primary" onclick="parseWdtt()" aria-label="Разобрать ссылку">Разобрать</button>
           </div>
         </div>
 

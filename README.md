@@ -1,8 +1,8 @@
 # WinDTT
 
-Windows и macOS GUI-клиент для туннеля [WireGuard over VK TURN](https://github.com/amurcanov/proxy-turn-vk-android).
+Windows и macOS GUI-клиент для туннеля [WireGuard over VK TURN](https://github.com/SpaceNeuroX/proxy-turn-vk-android).
 
-Движок (`go_client`, `server_src`) — из репо [amurcanov/proxy-turn-vk-android](https://github.com/amurcanov/proxy-turn-vk-android), синхронизируется автоматически.
+Движок (`go_client`, `server_src`) зеркалируется из активного апстрима [SpaceNeuroX/proxy-turn-vk-android](https://github.com/SpaceNeuroX/proxy-turn-vk-android) (исходная кодовая база — amurcanov/proxy-turn-vk-android, ныне архив) и синхронизируется автоматически.
 GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
 
 > Образовательный проект. Не предназначен для производственного использования.
@@ -13,12 +13,12 @@ GUI — Go + [Wails v2](https://wails.io) + Vanilla JS.
 
 ## Возможности
 
-- Подключение по `wdtt://` ссылке или вручную
+- Подключение по ссылке: legacy `wdtt://` (заполняет форму) или `qwdtt://config` (импорт готового профиля с именем и параметрами) — либо вручную
 - SOCKS5 + HTTP прокси с авторизацией через WireGuard userspace (gvisor netstack), без прав администратора
 - **Системный прокси** — чекбокс в шапке, перенаправляет WinINET-трафик (Chrome, Edge, Office) через туннель. Отдельный HTTP-прокси на случайном порту, без auth, без прав администратора
 - **Маршрутизация по правилам** — вкладка «Маршрутизация»: встроенные правила `domain:` / `domain-suffix:` / `keyword:` / `regex:` / `cidr:` / `ip:` (без скачивания) + правила `ruleset:geosite-<группа>` / `ruleset:geoip-<группа>` из дата-файлов, с политиками block / direct / proxy
 - SSH деплой `wdtt-server` на VPS с проверкой fingerprint
-- Авто-загрузка WireGuard конфига, статус-бар с пингом через туннель
+- Авто-загрузка WireGuard конфига, статус-бар с пингом через туннель, автоперезапуск при обрыве соединения (сон, смена сети, «мёртвый» туннель)
 - Светлая / тёмная тема
 - Ручная капча VK решается в нативном окне (Windows — WebView2, macOS — WKWebView через darwinkit; на остальных ОС — заглушка). Пользователь проходит проверку, токен уходит в туннель сам
 

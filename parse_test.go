@@ -47,6 +47,85 @@ func TestParseWdttInvalid(t *testing.T) {
 	}
 }
 
+// ── ParseQwdtt (qwdtt://config, как в Android-апстриме) ────────────────────────
+
+func TestParseQwdtt(t *testing.T) {
+	a := &App{}
+	r := a.ParseQwdtt("qwdtt://config?name=My+Server&peer=1.2.3.4&hashes=hash1%2Chash2&workers=5&port=9001&pass=secret")
+	if !r.OK {
+		t.Fatal("валидная qwdtt-ссылка должна разобраться")
+	}
+	if r.Name != "My Server" {
+		t.Errorf("Name = %q, ожидалось %q", r.Name, "My Server")
+	}
+	if r.Peer != "1.2.3.4:56000" {
+		t.Errorf("Peer = %q, ожидалось %q (добавляется порт DTLS)", r.Peer, "1.2.3.4:56000")
+	}
+	if r.Hashes != "hash1,hash2" {
+		t.Errorf("Hashes = %q, ожидалось %q (URL-decoded)", r.Hashes, "hash1,hash2")
+	}
+	if r.Secret != "secret" {
+		t.Errorf("Secret = %q, ожидалось %q", r.Secret, "secret")
+	}
+	if r.Workers != "5" {
+		t.Errorf("Workers = %q, ожидалось 5", r.Workers)
+	}
+	if r.Listen != "127.0.0.1:9001" {
+		t.Errorf("Listen = %q, ожидалось %q", r.Listen, "127.0.0.1:9001")
+	}
+}
+
+func TestParseQwdttDefaultsAndVariants(t *testing.T) {
+	a := &App{}
+	cases := []struct {
+		in         string
+		name, peer string
+		workers    string
+		listen     string
+	}{
+		{"qwdtt://config?peer=h", "QR Профиль", "h:56000", "9", "127.0.0.1:9000"},
+		{"qwdtt://config?peer=8.8.8.8:7000", "QR Профиль", "8.8.8.8:7000", "9", "127.0.0.1:9000"},
+		{"qwdtt://config?peer=h&port=0", "", "", "", ""},
+		{"qwdtt://config?peer=h&workers=0", "", "", "", ""},
+		{"qwdtt://config?peer=h&workers=abc", "", "", "", ""},
+		{"qwdtt://config?peer=h&pass=one&password=two", "QR Профиль", "h:56000", "9", "127.0.0.1:9000"},
+		{"qwdtt:config?peer=x:1234&pass=p", "QR Профиль", "x:1234", "9", "127.0.0.1:9000"},
+	}
+	for _, c := range cases {
+		r := a.ParseQwdtt(c.in)
+		if c.name == "" {
+			if r.OK {
+				t.Errorf("ParseQwdtt(%q) должно быть невалидным", c.in)
+			}
+			continue
+		}
+		if !r.OK {
+			t.Errorf("ParseQwdtt(%q) должно быть валидным", c.in)
+			continue
+		}
+		if r.Name != c.name || r.Peer != c.peer || r.Workers != c.workers || r.Listen != c.listen {
+			t.Errorf("ParseQwdtt(%q) = {Name:%q Peer:%q Workers:%q Listen:%q}, ожидалось {Name:%q Peer:%q Workers:%q Listen:%q}",
+				c.in, r.Name, r.Peer, r.Workers, r.Listen, c.name, c.peer, c.workers, c.listen)
+		}
+	}
+}
+
+func TestParseQwdttInvalid(t *testing.T) {
+	a := &App{}
+	cases := []string{
+		"",
+		"http://x/?peer=1.2.3.4",
+		"qwdtt://config?hashes=h",      // нет peer
+		"wdtt://1.2.3.4:56000:1:1:s:h", // legacy — не qwdtt
+		"qwdtt://other?peer=1.2.3.4",   // не config
+	}
+	for _, in := range cases {
+		if r := a.ParseQwdtt(in); r.OK {
+			t.Errorf("ParseQwdtt(%q) должно быть невалидным", in)
+		}
+	}
+}
+
 // ── validPort ─────────────────────────────────────────────────────────────────
 
 func TestValidPort(t *testing.T) {

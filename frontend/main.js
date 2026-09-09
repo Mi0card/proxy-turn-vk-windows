@@ -578,10 +578,15 @@ async function confirmProfileModal() {
   await saveConfig();
 }
 
-// ── Парсим wdtt:// ─────────────────────────────────────────────────────────────
+// ── Парсим wdtt:// / qwdtt:// ──────────────────────────────────────────────────
 
 async function parseWdtt() {
-  const link = getVal('wlink');
+  const link = (getVal('wlink') || '').trim();
+  if (!link) return;
+  if (/^qwdtt:(?:\/\/)?config/i.test(link)) {
+    await importQwdtt(link);
+    return;
+  }
   const r = await window.go.main.App.ParseWdtt(link);
   if (r.ok) {
     setVal('srv', r.server);
@@ -591,6 +596,42 @@ async function parseWdtt() {
   } else {
     log('Неверный формат wdtt://', 'error');
   }
+}
+
+// Импорт быстрой ссылки qWDTT (полный профиль, как в Android-апстриме):
+// сохраняем/активируем профиль и заполняем им форму подключения.
+async function importQwdtt(link) {
+  const r = await window.go.main.App.ParseQwdtt(link);
+  if (!r.ok) {
+    log('Неверный формат qwdtt://', 'error');
+    showToast('Неверный формат qwdtt://');
+    return;
+  }
+  let name = r.name || 'QR Профиль';
+  const base = name;
+  for (let i = 2; state.connProfiles.some(p => p.name === name); i++) name = base + ' (' + i + ')';
+  const p = {
+    name,
+    vk: r.hashes,
+    srv: r.peer,
+    sec: r.secret,
+    n: r.workers,
+    listen: r.listen,
+    captcha_mode: 'auto',
+    obfs_mode: 'audio',
+  };
+  await window.go.main.App.SaveProfile(p);
+  await window.go.main.App.SetActiveProfile(name);
+  const idx = state.connProfiles.findIndex(x => x.name === name);
+  if (idx >= 0) state.connProfiles[idx] = p;
+  else state.connProfiles.push(p);
+  state.activeProfile = name;
+  applyProfile(p);
+  setLoadedProfile(p);
+  renderProfiles();
+  await saveConfig();
+  log('qwdtt:// → профиль «' + name + '» (' + r.peer + ')', 'success');
+  showToast('Профиль «' + name + '» импортирован');
 }
 
 // ── Туннель ────────────────────────────────────────────────────────────────────
@@ -1834,8 +1875,10 @@ WireGuard over VK TURN — туннель через звонки VK
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ПОДКЛЮЧЕНИЕ
-  1. Вставьте wdtt:// ссылку → «Разобрать»,
-     либо заполните вручную: VK хеш, VPS адрес (IP:PORT), Secret.
+  1. Вставьте ссылку → «Разобрать»:
+     · wdtt://…  — заполнит форму (VK хеш, VPS, Secret);
+     · qwdtt://config?… — импортирует готовый профиль подключения.
+     Либо заполните вручную: VK хеш, VPS адрес (IP:PORT), Secret.
   2. Нажмите «▶ Подключить».
   3. Конфиг WireGuard появится на вкладке WireGuard —
      скопируйте его в WireGuard клиент.

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.2.11.3"
+const AppVersion = "0.3.0.0"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -711,7 +712,7 @@ func (a *App) GetClientExePath() string {
 	return a.clientExe
 }
 
-// ── Parse wdtt:// ─────────────────────────────────────────────────────────────
+// ── Parse wdtt:// & qwdtt://config ─────────────────────────────────────────────
 
 type ParseResult struct {
 	OK     bool   `json:"ok"`
@@ -739,6 +740,103 @@ func (a *App) ParseWdtt(link string) ParseResult {
 		Hash:   parts[5],
 		Secret: parts[4],
 	}
+}
+
+// ── qwdtt://config ─────────────────────────────────────────────────────────────
+
+// qwdttDefaultDtlsPort — порт DTLS сервера по умолчанию, если в peer qwdtt-ссылки
+// нет явного порта (Android-клиент: SettingsStore.serverDtlsPort = 56000).
+const qwdttDefaultDtlsPort = 56000
+
+// QwdttResult — результат разбора быстрой ссылки qWDTT: полный профиль
+// подключения из query-параметров (см. server/database_bot.go и
+// SubscriptionImport.parseQwdttUri в Android-апстриме).
+type QwdttResult struct {
+	OK      bool   `json:"ok"`
+	Name    string `json:"name"`   // имя профиля (по умолчанию "QR Профиль", как в апстриме)
+	Peer    string `json:"peer"`   // host:port сервера; без явного порта добавляется :56000
+	Hashes  string `json:"hashes"` // VK-хеши через запятую (может быть пусто = глобальные)
+	Secret  string `json:"secret"` // пароль подключения (WRAP)
+	Workers string `json:"workers"`
+	Listen  string `json:"listen"` // локальный адрес 127.0.0.1:<port>
+}
+
+func (a *App) ParseQwdtt(link string) QwdttResult {
+	name, peer, hashes, secret, listen, workers, ok := parseQwdttLink(link)
+	if !ok {
+		return QwdttResult{}
+	}
+	return QwdttResult{
+		OK:      true,
+		Name:    name,
+		Peer:    peer,
+		Hashes:  hashes,
+		Secret:  secret,
+		Workers: strconv.Itoa(workers),
+		Listen:  listen,
+	}
+}
+
+// parseQwdttLink разбирает ссылку вида qwdtt://config?name=..&peer=..&hashes=..
+// (&workers=9&port=9000&pass=..). Принимаются и qwdtt:config (без //), как в апстриме.
+func parseQwdttLink(link string) (name, peer, hashes, secret, listen string, workers int, ok bool) {
+	s := strings.TrimSpace(link)
+	norm := strings.Replace(s, "qwdtt:config", "qwdtt://config", 1)
+	if !strings.HasPrefix(norm, "qwdtt://config") {
+		return "", "", "", "", "", 0, false
+	}
+	u, err := url.Parse(norm)
+	if err != nil || u.Scheme != "qwdtt" {
+		return "", "", "", "", "", 0, false
+	}
+	q := u.Query()
+
+	peer = strings.TrimSpace(q.Get("peer"))
+	if peer == "" {
+		return "", "", "", "", "", 0, false
+	}
+	name = strings.TrimSpace(q.Get("name"))
+	if name == "" {
+		name = "QR Профиль" // дефолт Android-клиента
+	}
+	hashes = strings.TrimSpace(q.Get("hashes"))
+	secret = strings.TrimSpace(q.Get("pass"))
+	if secret == "" {
+		secret = strings.TrimSpace(q.Get("password"))
+	}
+	workers = 9
+	if v := strings.TrimSpace(q.Get("workers")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return "", "", "", "", "", 0, false
+		}
+		workers = n
+	}
+	port := 9000
+	if v := strings.TrimSpace(q.Get("port")); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return "", "", "", "", "", 0, false
+		}
+		port = p
+	}
+	peer = ensurePeerPort(peer, qwdttDefaultDtlsPort)
+	return name, peer, hashes, secret, fmt.Sprintf("127.0.0.1:%d", port), workers, true
+}
+
+// ensurePeerPort добавляет defaultPort к peer без явного числового порта
+// (аналог PeerAddress.ensurePort в Android). IPv6 без скобок обрабатывается.
+func ensurePeerPort(peer string, defaultPort int) string {
+	peer = strings.TrimSpace(peer)
+	if peer == "" {
+		return peer
+	}
+	if host, port, err := net.SplitHostPort(peer); err == nil {
+		if p, err := strconv.Atoi(port); err == nil && p >= 1 && p <= 65535 {
+			return net.JoinHostPort(host, port)
+		}
+	}
+	return net.JoinHostPort(strings.Trim(peer, "[]"), strconv.Itoa(defaultPort))
 }
 
 // shellQuote экранирует строку для безопасной передачи в shell
