@@ -172,7 +172,6 @@ func main() {
 	deviceID := flag.String("device-id", "unknown", "уникальный ID устройства")
 	connPassword := flag.String("password", "", "пароль подключения")
 	captchaMode := flag.String("captcha-mode", "auto", "режим обхода капчи (auto/wv/rjs)")
-	fingerprintFlag := flag.String("fingerprint", "chrome", "TLS/HTTP fingerprint (chrome/android/ios/safari/firefox)")
 	vkAuthMode := flag.String("vk-auth", "anonymous", "режим VK авторизации (account/anonymous)")
 	vkAnonPath := flag.String("vk-anon-path", "vkcalls", "анонимный путь VK TURN (vkcalls/legacy)")
 	vkCredsFile := flag.String("vk-creds-file", "", "файл с TURN кредами от аккаунта VK")
@@ -205,7 +204,6 @@ func main() {
 	activeCaptchaMode := setCaptchaMode(*captchaMode)
 	activeVkAuthMode := setVkAuthMode(*vkAuthMode)
 	activeVkAnonPath := setVkAnonPath(*vkAnonPath)
-	SetActiveFingerprint(*fingerprintFlag)
 
 	if err := loadVkCredsFile(*vkCredsFile); err != nil {
 		log.Fatalf("[КЛИЕНТ] Ошибка чтения vk-creds-file: %v", err)
@@ -341,7 +339,7 @@ func main() {
 
 	log.Println("[КЛИЕНТ] ═══════════════════════════════════════")
 	log.Printf("[КЛИЕНТ] VK Creds: 2 stable app_id с циклическим fallback")
-	log.Printf("[КЛИЕНТ] TLS: %s fingerprint", GetActiveFingerprint())
+	log.Printf("[КЛИЕНТ] TLS: Chrome 146 fingerprint")
 	log.Printf("[КЛИЕНТ] Воркеров: %d (групп: %d, по %d)", *numW, numGroups, workersPerGroup)
 	log.Printf("[КЛИЕНТ] Хешей: %d", len(hashes))
 	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", localConn.LocalAddr(), *peerAddr)

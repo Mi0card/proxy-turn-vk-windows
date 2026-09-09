@@ -95,6 +95,7 @@ func (a *App) resetWakeCountersLocked() {
 	a.mismatchCount = 0
 	a.refusedCount = 0
 	a.wrapTimeoutCount = 0
+	a.deadlineWorkers = nil
 	a.restartAttempts = 0
 }
 

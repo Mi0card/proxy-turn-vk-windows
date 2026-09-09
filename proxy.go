@@ -49,13 +49,20 @@ func wgDial(network, addr string) (net.Conn, error) {
 // wgDialStrict — только через туннель, без fallback на прямое соединение.
 // Используется системным прокси: нет туннеля → ошибка → браузер получает 502.
 func wgDialStrict(network, addr string) (net.Conn, error) {
+	return wgDialStrictTimeout(network, addr, 30*time.Second)
+}
+
+// wgDialStrictTimeout — как wgDialStrict, но с заданным таймаутом диалога.
+// Нужен liveness-пробе туннеля (pingLoop): 30-секундный дефолт слишком долог
+// для детекта «мёртвого» соединения с периодом опроса 5 секунд.
+func wgDialStrictTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
 	wgTun.mu.Lock()
 	tnet := wgTun.tnet
 	active := wgTun.active
 	wgTun.mu.Unlock()
 
 	if active && tnet != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		return tnet.DialContext(ctx, network, addr)
 	}

@@ -33,7 +33,7 @@ jobs:
           rm -rf server_src
           cp -r upstream/server ./server_src
 
-      # Локальный слой (fingerprint-переключение + Windows-build-фиксы)
+      # Локальный слой (Windows-build-фиксы)
       # пере-накладывается поверх свежего go_client/ из upstream. Патч + источник
       # правды в .agent/local/go-client-local/. git apply внутри жёстко падает
       # при дрейфе — слой нельзя потерять молча.
@@ -100,7 +100,7 @@ jobs:
             Обновлено:
             - `go_client/` — туннельный движок (`go_client`)
             - `server_src/` — серверная часть (`server`)
-            - Локальный слой (fingerprint-переключение + Windows-build-фиксы)
+            - Локальный слой (Windows-build-фиксы)
               пере-наложен поверх свежего движка (`.agent/local/go-client-local/`).
 
             - Upstream: `SpaceNeuroX/proxy-turn-vk-android`

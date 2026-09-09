@@ -15,7 +15,7 @@ const state = {
   activeTab:       'connect',
   activeWorkers:  0,
   totalWorkers:   0,
-  connProfiles:   [],   // [{name, vk, srv, sec, n, listen, captcha_mode, obfs_mode, fingerprint}]
+  connProfiles:   [],   // [{name, vk, srv, sec, n, listen, captcha_mode, obfs_mode}]
   activeProfile:  '',
   loadedProfile:  null, // профиль, поля которого сейчас в форме (снимок для dirty-проверки)
 };
@@ -234,10 +234,6 @@ function loadConfig(cfg) {
   if (cfg.sec)      setVal('sec',        cfg.sec);
   if (cfg.n)        setVal('n-workers',  cfg.n);
   if (cfg.listen)   setVal('listen',     cfg.listen);
-  if (cfg.fingerprint) {
-    const fp = document.getElementById('fingerprint');
-    if (fp) for (let o of fp.options) if (o.value === cfg.fingerprint) o.selected = true;
-  }
   if (cfg.px_host)  setVal('px-host',    cfg.px_host);
   if (cfg.px_socks_port) setVal('px-port', cfg.px_socks_port);
   if (cfg.px_http_port) setVal('px-http-port', cfg.px_http_port);
@@ -281,7 +277,6 @@ function loadConfig(cfg) {
 function collectConfig() {
   return {
     vk:           getVkHashes(),
-    fingerprint:  document.getElementById('fingerprint')?.value || 'firefox',
     srv:          getVal('srv'),
     sec:          getVal('sec'),
     n:            getVal('n-workers') || '9',
@@ -327,7 +322,6 @@ function collectProfile() {
     listen:       getVal('listen') || '127.0.0.1:9000',
     captcha_mode: setSel('captcha-mode', 'auto'),
     obfs_mode:    setSel('obfs-mode', 'audio'),
-    fingerprint:  setSel('fingerprint', 'firefox'),
   };
 }
 
@@ -347,7 +341,6 @@ function applyProfile(p) {
   };
   setOpt('captcha-mode', p.captcha_mode);
   setOpt('obfs-mode', p.obfs_mode);
-  setOpt('fingerprint', p.fingerprint);
 }
 
 // Сбрасывает поля подключения к пустым значениям.
@@ -355,7 +348,7 @@ function clearForm() {
   setVkHashes('');
   const direct = (id) => { const el = document.getElementById(id); if (el) el.value = ''; };
   direct('srv'); direct('sec'); direct('n-workers'); direct('listen');
-  direct('captcha-mode'); direct('obfs-mode'); direct('fingerprint');
+  direct('captcha-mode'); direct('obfs-mode');
 }
 
 // Снимок текущей формы в виде «профиля» (без имени) для dirty-проверки.
@@ -367,7 +360,7 @@ function formSnapshot() {
 
 function profilesEqual(a, b) {
   if (!a || !b) return false;
-  return ['vk','srv','sec','n','listen','captcha_mode','obfs_mode','fingerprint']
+  return ['vk','srv','sec','n','listen','captcha_mode','obfs_mode']
     .every(k => (a[k] || '') === (b[k] || ''));
 }
 
@@ -553,7 +546,7 @@ async function confirmProfileModal() {
       showToast('Профиль с таким именем уже существует', 'error');
       return;
     }
-    const p = { name, vk: '', srv: '', sec: '', n: '9', listen: '127.0.0.1:9000', captcha_mode: 'auto', obfs_mode: 'audio', fingerprint: 'firefox' };
+    const p = { name, vk: '', srv: '', sec: '', n: '9', listen: '127.0.0.1:9000', captcha_mode: 'auto', obfs_mode: 'audio' };
     await window.go.main.App.SaveProfile(p);
     state.connProfiles.push(p);
     state.activeProfile = name;
@@ -609,7 +602,6 @@ async function connect() {
   const n   = getVal('n-workers').trim() || '9';
   const lst = getVal('listen').trim()    || '127.0.0.1:9000';
   const cm  = document.getElementById('captcha-mode').value;
-  const fp  = document.getElementById('fingerprint')?.value || 'firefox';
   const om  = document.getElementById('obfs-mode')?.value || 'audio';
 
   if (!vk)  { log('Введите VK хеш!',    'error'); return; }
@@ -630,7 +622,7 @@ async function connect() {
     const deviceID = cfg.device_id || '';
 
     log('Подключение → ' + srv, 'info');
-    const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, fp, om);
+    const err = await window.go.main.App.TunnelStart(hash, srv, sec, n, lst, cm, deviceID, om);
     if (err) {
       log('Ошибка: ' + err, 'error');
       showToast('Не удалось подключиться: ' + err);

@@ -19,6 +19,7 @@ import (
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 	"github.com/google/uuid"
 )
 
@@ -378,7 +379,7 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 
 	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(),
 		tlsclient.WithTimeoutSeconds(20),
-		tlsclient.WithClientProfile(tlsProfileForFingerprint()),
+		tlsclient.WithClientProfile(profiles.Chrome_146),
 		tlsclient.WithCookieJar(jar),
 	)
 	if err != nil {

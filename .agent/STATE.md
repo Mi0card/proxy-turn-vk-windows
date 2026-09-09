@@ -4,32 +4,33 @@
      Contradicts git log / the journal (a session died before END)? Trust git: rebuild this
      file from the last journal entry + `git log -5`, note the crash in the journal. -->
 
-Session: 11
+Session: 12
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: M11 engine upstream migrated to SpaceNeuroX — build/vet verified, uncommitted
-Next: commit the migration (61 changed/untracked files incl. .agent/local/ + go_client/ + server_src/);
-      GUI Phase 6 touches; I1 open (Linux-only server tests)
+Active: S12 done — fingerprint dropped (layer = Windows-build only) + dead-tunnel auto-restart
+       (A: all-workers "context deadline exceeded" breaker; B: 3× failed pings via tunnel). Uncommitted.
+Next: commit S12; qwdtt:// link parsing (queued task); I1 open (Linux-only server tests)
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
-- Local go_client layer = `.agent/local/go-client-local/` (patch + apply.sh): fingerprint switching +
-  GOOS=windows build fixes, re-applied by sync/build, fail-loud on drift (D13/D11). NEW FILES NOT
-  YET `git add`-ed — commit BEFORE any sync/build run, else CI lacks the layer.
+- Local go_client layer = `.agent/local/go-client-local/` (patch + apply.sh): now ONLY GOOS=windows
+  build fixes (listen retry/dynamic-port + tun_fd unavailable), re-applied by sync/build, fail-loud
+  on drift (D13 windows half). Fingerprint feature removed repo-wide (D14). go_client/ in repo is
+  upstream master + this layer (no local fingerprint code anywhere).
 - go_client/ & server_src/ mirrored from `SpaceNeuroX/proxy-turn-vk-android` (go_client ← go_client,
   server_src ← server). server_src = standalone module mirroring upstream ROOT go.mod (dtls v3.1.5,
   transport v4.0.2) + copied upstream go.sum; keep in step when upstream bumps.
 - server_src builds for linux/amd64 only (GOOS=linux GOARCH=amd64); its tests can't run on Windows.
-- Slow module downloads / sum.golang.org TLS timeouts → build/vet with `GOSUMDB=off`; network unruly
-  yesterday but go_client + server_src builds succeeded. Full app build (build.ps1) needs Wails CLI
-  + MSYS2 GCC — not installed on this box (unverified).
-- app.go-client flags unchanged (GUI args still valid); deploy.sh v3.2 ExecStart flags (-listen
-  -wg-port -config-dir) all supported by new server — no app.go deploy changes needed.
+- Slow module downloads / sum.golang.org TLS timeouts → build/vet with `GOSUMDB=off`. Full app build
+  (build.ps1) needs Wails CLI + MSYS2 GCC — not installed on this box (unverified).
+- Config top-level `fingerprint` = SSH host-key of VPS (deploy MITM guard) — NOT browser fingerprint;
+  SaveConfig keeps it when empty (app.go). Do not repurpose that key.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
-- S11 M11 part 1: go_client & server_src replaced with upstream SpaceNeuroX; local layer carries
-  fingerprint + Windows build; both `go build` + `go vet` green; root `go build` + `go test` green.
-- S10 I7 closed: app.go finalizeDone channel — TunnelStop + quitApp wait for finalizeTunnel (5s timeout).
-- S9 I6 closed: proxy.go Transport pool — connection pooling for non-CONNECT HTTP requests.
+- S12: fingerprint switching removed (GUI select, app.go arg, go_client flag/TLS-map, frontend profiles);
+  dead-tunnel auto-restart added (all-workers context-deadline burst + ping-failure probe), always-on
+  via ensureRestart; root build/vet/test + engine build green.
+- S11: go_client & server_src replaced with upstream SpaceNeuroX; root build/test green.
+- S10: app.go finalizeDone channel — TunnelStop + quitApp wait for finalizeTunnel (5s timeout).
 
 ## Recently audited (cleared — stop re-litigating)
 - Backend startup, config schema, build pipeline: no debt found. S5 re-checked DECISIONS: no `(assumed)` lines.

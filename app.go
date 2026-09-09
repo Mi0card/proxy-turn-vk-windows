@@ -41,17 +41,18 @@ type ConnProfile struct {
 	Listen      string `json:"listen"`
 	CaptchaMode string `json:"captcha_mode"`
 	ObfsMode    string `json:"obfs_mode"`
-	Fingerprint string `json:"fingerprint"`
 }
 
 type Config struct {
-	VK             string          `json:"vk,omitempty"`
-	Srv            string          `json:"srv,omitempty"`
-	Sec            string          `json:"sec,omitempty"`
-	N              string          `json:"n,omitempty"`
-	Listen         string          `json:"listen,omitempty"`
-	CaptchaMode    string          `json:"captcha_mode,omitempty"`
-	ObfsMode       string          `json:"obfs_mode,omitempty"`
+	VK          string `json:"vk,omitempty"`
+	Srv         string `json:"srv,omitempty"`
+	Sec         string `json:"sec,omitempty"`
+	N           string `json:"n,omitempty"`
+	Listen      string `json:"listen,omitempty"`
+	CaptchaMode string `json:"captcha_mode,omitempty"`
+	ObfsMode    string `json:"obfs_mode,omitempty"`
+	// Fingerprint — сохранённый SSH host-key отпечаток VPS для деплоя
+	// (DeployGetFingerprint → DeployRun/UndeployRun, защита от MITM).
 	Fingerprint    string          `json:"fingerprint,omitempty"`
 	DeviceID       string          `json:"device_id"`
 	Profiles       []ConnProfile   `json:"profiles"`
@@ -94,7 +95,7 @@ type WorkerStats struct {
 
 // tunnelParams хранит параметры запуска туннеля для автоперезапуска
 type tunnelParams struct {
-	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode string
+	vk, srv, sec, n, listen, captchaMode, deviceID, obfsMode string
 }
 
 type App struct {
@@ -128,10 +129,14 @@ type App struct {
 	mismatchCount    int
 	refusedCount     int
 	wrapTimeoutCount int
-	lastActiveAt     int64 // unix ms последней активности воркеров
-	procStartedAt    int64 // unix ms запуска процесса
-	lastCBReset      int64 // unix ms последнего сброса circuit breaker
-	activeWorkers    int
+	// deadlineWorkers — воркеры, поймавшие «context deadline exceeded» в текущем
+	// 60-секундном окне circuit breaker (по ID из строки [ВОРКЕР #N]). Когда в
+	// окне «мёртвы» все воркеры — перезапускаем туннель (см. noteWorkerDeadline).
+	deadlineWorkers map[int]bool
+	lastActiveAt    int64 // unix ms последней активности воркеров
+	procStartedAt   int64 // unix ms запуска процесса
+	lastCBReset     int64 // unix ms последнего сброса circuit breaker
+	activeWorkers   int
 
 	// Автовосстановление: wake-монитор + single-flight перезапуска
 	wakeStop   chan struct{}
@@ -186,7 +191,18 @@ var (
 	reWorkers = regexp.MustCompile(`(?i)всего:\s*(\d+)|осталось:\s*(\d+)|активных:\s*(\d+)`)
 	reTraffic = regexp.MustCompile(`(?i)трафик:\s*([\d.]+)\s*(МБ|MB|KB|КБ|GB|ГБ)`)
 	reFatal   = regexp.MustCompile(`(?i)фатальн|fatal_auth|fatal auth`)
+	// reWorkerID вытаскивает номер воркера из строк вида "[ВОРКЕР #12] ...".
+	reWorkerID = regexp.MustCompile(`\[воркер #(\d+)\]`)
 )
+
+// deadlineBurstLimit — сколько разных воркеров должно поймать таймаут
+// рукопожатия, чтобы счесть туннель мёртвым: все воркеры (минимум 1).
+func deadlineBurstLimit(totalWorkers int) int {
+	if totalWorkers < 1 {
+		return 1
+	}
+	return totalWorkers
+}
 
 // extractClientExe распаковывает встроенный wdtt-client.exe во временную папку.
 func extractClientExe(data []byte) (string, error) {
@@ -519,7 +535,6 @@ func (a *App) migrateLegacyProfileLocked() {
 		Listen:      a.cfg.Listen,
 		CaptchaMode: a.cfg.CaptchaMode,
 		ObfsMode:    a.cfg.ObfsMode,
-		Fingerprint: a.cfg.Fingerprint,
 	}
 	a.cfg.Profiles = []ConnProfile{p}
 	a.cfg.ActiveProfile = p.Name
@@ -538,7 +553,6 @@ func (a *App) clearLegacyConnFieldsLocked() {
 	a.cfg.Listen = ""
 	a.cfg.CaptchaMode = ""
 	a.cfg.ObfsMode = ""
-	a.cfg.Fingerprint = ""
 }
 
 // getCfg возвращает копию конфига под RLock.
@@ -568,6 +582,11 @@ func (a *App) SaveConfig(cfg Config) {
 	if cfg.ActiveProfile == "" {
 		cfg.ActiveProfile = a.cfg.ActiveProfile
 	}
+	// Fingerprint (SSH host-key VPS) фронтенд не редактирует — сохраняем текущее,
+	// иначе каждое сохранение настроек стирало бы сохранённый отпечаток.
+	if cfg.Fingerprint == "" {
+		cfg.Fingerprint = a.cfg.Fingerprint
+	}
 	// Параметры подключения живут только в профилях — не позволяем фронтенду
 	// вернуть в конфиг старые «безымянные» записи.
 	cfg.VK = ""
@@ -577,7 +596,6 @@ func (a *App) SaveConfig(cfg Config) {
 	cfg.Listen = ""
 	cfg.CaptchaMode = ""
 	cfg.ObfsMode = ""
-	cfg.Fingerprint = ""
 	a.cfg = cfg
 	a.cfgMu.Unlock()
 	a.persistConfig()
@@ -880,7 +898,7 @@ func generateUUID() string {
 }
 
 func (a *App) TunnelStart(
-	vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode string,
+	vk, srv, sec, n, listen, captchaMode, deviceID, obfsMode string,
 ) string {
 	a.tunnelMu.Lock()
 	defer a.tunnelMu.Unlock()
@@ -918,9 +936,6 @@ func (a *App) TunnelStart(
 		"-device-id", deviceID,
 		"-captcha-mode", captchaMode,
 	}
-	if fingerprint != "" && fingerprint != "chrome" {
-		args = append(args, "-fingerprint", fingerprint)
-	}
 	if obfsMode != "" && obfsMode != "audio" {
 		args = append(args, "-obfs", obfsMode)
 	}
@@ -953,13 +968,14 @@ func (a *App) TunnelStart(
 	a.pingStop = make(chan struct{})
 	go a.pingLoop(a.pingStop)
 	// Сохраняем параметры для автоперезапуска
-	a.lastTunnelParams = &tunnelParams{vk, srv, sec, n, listen, captchaMode, deviceID, fingerprint, obfsMode}
+	a.lastTunnelParams = &tunnelParams{vk, srv, sec, n, listen, captchaMode, deviceID, obfsMode}
 	a.procStartedAt = time.Now().UnixMilli()
 	a.lastActiveAt = 0
 	a.floodCount = 0
 	a.mismatchCount = 0
 	a.refusedCount = 0
 	a.wrapTimeoutCount = 0
+	a.deadlineWorkers = nil
 	a.lastCBReset = 0
 	a.watchdogStop = make(chan struct{})
 	go a.watchdog(a.watchdogStop)
@@ -1168,8 +1184,8 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 					conf := strings.TrimSpace(string(data))
 					runtime.EventsEmit(a.ctx, "tunnel:wgconfig", conf)
 					// Поднимаем WireGuard userspace для прокси
-go func() {
-					if err := StartWGTunnel(conf, ParseDNSOverride(a.getCfg().DNS)); err != nil {
+					go func() {
+						if err := StartWGTunnel(conf, ParseDNSOverride(a.getCfg().DNS)); err != nil {
 							a.log("   [WG] Ошибка netstack: "+err.Error(), "warn")
 						} else {
 							a.log("   [WG] Userspace туннель активен — прокси работает через туннель.", "success")
@@ -1284,7 +1300,21 @@ func (a *App) checkCircuitBreaker(line string) {
 		a.floodCount = 0
 		a.mismatchCount = 0
 		a.refusedCount = 0
+		a.deadlineWorkers = nil
 		a.lastCBReset = now
+	}
+
+	// Мёртвый туннель: все воркеры подряд ловят таймаут рукопожатия
+	// («context deadline exceeded», см. errhint.go в go_client). Отдельный
+	// счётчик по отказавшим — один «флапающий» воркер не перезапустит туннель.
+	if strings.Contains(ll, "context deadline exceeded") {
+		if m := reWorkerID.FindStringSubmatch(ll); m != nil {
+			id, _ := strconv.Atoi(m[1])
+			if a.noteWorkerDeadline(id) {
+				a.deadlineWorkers = nil
+				go a.ensureRestart("⚠ Все воркеры поймали таймаут рукопожатия — соединение мертво. Перезапуск...")
+			}
+		}
 	}
 
 	switch {
@@ -1319,6 +1349,17 @@ func (a *App) checkCircuitBreaker(line string) {
 	case strings.Contains(ll, "call not found") || (strings.Contains(ll, "9000") && strings.Contains(ll, "error")):
 		// hash error — можно добавить переключение хеша в будущем
 	}
+}
+
+// noteWorkerDeadline регистрирует воркера workerID, поймавшего таймаут
+// рукопожатия в текущем окне circuit breaker. Возвращает true, когда в окне
+// «мёртвы» все воркеры (deadlineBurstLimit). Требует взятого tunnelMu.
+func (a *App) noteWorkerDeadline(workerID int) bool {
+	if a.deadlineWorkers == nil {
+		a.deadlineWorkers = make(map[int]bool)
+	}
+	a.deadlineWorkers[workerID] = true
+	return len(a.deadlineWorkers) >= deadlineBurstLimit(a.totalWorkers)
 }
 
 func (a *App) handleCritical(msg string) {
@@ -1452,28 +1493,59 @@ func (a *App) restartTunnel() {
 
 	// Перезапускаем с теми же параметрами
 	if err := a.TunnelStart(params.vk, params.srv, params.sec, params.n,
-		params.listen, params.captchaMode, params.deviceID, params.fingerprint, params.obfsMode); err != "" {
+		params.listen, params.captchaMode, params.deviceID, params.obfsMode); err != "" {
 		a.log("✗ Ошибка перезапуска: "+err, "error")
 	}
+}
+
+// pingLoop — liveness-проба туннеля: раз в 5 секунд честный dial через
+// WireGuard (строго через туннель) к cp.cloudflare.com:80. Успех → отдаём
+// задержку в UI. N подряд провалов при работающем, не на паузе туннеле
+// означают «соединение мертво» — перезапускаем через ensureRestart
+// (single-flight + лимит попыток).
+const (
+	pingProbeTimeout  = 4 * time.Second
+	pingFailToRestart = 3
+)
+
+func deadTunnelOnPingFails(failCount int) bool {
+	return failCount >= pingFailToRestart
 }
 
 func (a *App) pingLoop(stop chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	failCount := 0
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
-			if !WGTunnelActive() {
-				continue // туннель не поднят — пинг бессмыслен
+			a.tunnelMu.Lock()
+			running := a.tunnelRunning
+			paused := a.tunnelPaused
+			a.tunnelMu.Unlock()
+
+			// Туннель остановлен/на паузе или WG ещё не поднят — не считаем.
+			if !running || paused || !WGTunnelActive() {
+				failCount = 0
+				continue
 			}
+
 			start := time.Now()
-			c, err := wgDial("tcp", "cp.cloudflare.com:80")
+			c, err := wgDialStrictTimeout("tcp", "cp.cloudflare.com:80", pingProbeTimeout)
 			if err == nil {
-				ms := time.Since(start).Milliseconds()
 				c.Close()
-				runtime.EventsEmit(a.ctx, "tunnel:ping", ms)
+				failCount = 0
+				runtime.EventsEmit(a.ctx, "tunnel:ping", time.Since(start).Milliseconds())
+				continue
+			}
+
+			failCount++
+			if deadTunnelOnPingFails(failCount) {
+				a.log("⚠ Пинг через туннель не проходит — соединение мертво. Перезапуск...", "warn")
+				go a.ensureRestart("Туннель не пропускает трафик (нет пинга)")
+				return
 			}
 		}
 	}
@@ -2175,11 +2247,11 @@ func (a *App) ImportConfig() ImportResult {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ImportResult{OK: false, Error: "Не удалось прочитать файл: "+err.Error()}
+		return ImportResult{OK: false, Error: "Не удалось прочитать файл: " + err.Error()}
 	}
 	var imported Config
 	if err := json.Unmarshal(data, &imported); err != nil {
-		return ImportResult{OK: false, Error: "Некорректный JSON конфигурации: "+err.Error()}
+		return ImportResult{OK: false, Error: "Некорректный JSON конфигурации: " + err.Error()}
 	}
 	a.cfgMu.Lock()
 	imported.DeviceID = a.cfg.DeviceID

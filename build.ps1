@@ -18,8 +18,8 @@ if (-not (Test-Path "$root\assets\server\wdtt-server")) {
 
 # 1. go_client
 Write-Host "[1/3] go_client..." -ForegroundColor Yellow
-# Восстанавливаем локальный слой поверх движка (fingerprint-переключение +
-# Windows-build-фиксы; идемпотентно, жёстко падает при дрейфе). Патч:
+# Восстанавливаем локальный слой поверх движка (Windows-build-фиксы;
+# идемпотентно, жёстко падает при дрейфе). Патч:
 # .agent/local/go-client-local/.
 $applySh = "$root\.agent\local\go-client-local\apply.sh"
 & "C:\Program Files\Git\bin\bash.exe" $applySh
