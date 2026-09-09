@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.0.0"
+const AppVersion = "0.3.0.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -147,6 +147,11 @@ type App struct {
 	// Монитор смены сети
 	netStop          chan struct{}
 	lastNetRestartAt time.Time // под tunnelMu: кулдаун между сетевыми перезапусками
+
+	// Детектор «мёртвый туннель»: кулдаун рестартов по смерти (не сбрасывается
+	// активностью воркеров, в отличие от restartAttempts — иначе туннель
+	// рестартовал бы бесконечно).
+	lastDeadRestartAt time.Time
 
 	// Финализация туннеля: канал закрывается когда finalizeTunnel завершается.
 	finalizeDone chan struct{}
@@ -1405,12 +1410,12 @@ func (a *App) checkCircuitBreaker(line string) {
 	// Мёртвый туннель: все воркеры подряд ловят таймаут рукопожатия
 	// («context deadline exceeded», см. errhint.go в go_client). Отдельный
 	// счётчик по отказавшим — один «флапающий» воркер не перезапустит туннель.
+	// Решение о рестарте принимает requestDeadRestartLocked (грейс/активность/кулдаун).
 	if strings.Contains(ll, "context deadline exceeded") {
 		if m := reWorkerID.FindStringSubmatch(ll); m != nil {
 			id, _ := strconv.Atoi(m[1])
 			if a.noteWorkerDeadline(id) {
-				a.deadlineWorkers = nil
-				go a.ensureRestart("⚠ Все воркеры поймали таймаут рукопожатия — соединение мертво. Перезапуск...")
+				a.requestDeadRestartLocked("⚠ Все воркеры поймали таймаут рукопожатия — соединение мертво. Перезапуск...")
 			}
 		}
 	}
@@ -1443,6 +1448,7 @@ func (a *App) checkCircuitBreaker(line string) {
 		} else {
 			a.lastActiveAt = time.Now().UnixMilli()
 			a.restartAttempts = 0
+			a.deadlineWorkers = nil // живая активность снимает подозрение на «смерть»
 		}
 	case strings.Contains(ll, "call not found") || (strings.Contains(ll, "9000") && strings.Contains(ll, "error")):
 		// hash error — можно добавить переключение хеша в будущем
@@ -1458,6 +1464,58 @@ func (a *App) noteWorkerDeadline(workerID int) bool {
 	}
 	a.deadlineWorkers[workerID] = true
 	return len(a.deadlineWorkers) >= deadlineBurstLimit(a.totalWorkers)
+}
+
+// ── Детектор «мёртвый туннель»: единая точка принятия решения ────────────────
+// Оба детектора (все воркеры с context deadline exceeded и liveness-проба пинга)
+// зовут requestDeadRestart*. Чтобы не рестартовать живой, но флапающий туннель,
+// рестарт разрешён только когда туннель работает, не на паузе, уже прошёл
+// стартовую раскачку, давно не видел активности воркеров и рестарты по «смерти»
+// не упираются в кулдаун (кулдаун не сбрасывается активностью — иначе петля).
+const (
+	deadRestartCooldown = 3 * time.Minute    // не чаще одного рестарта по «смерти»
+	deadStartGrace      = 90 * time.Second   // не судим туннель первые 90 с после старта
+	deadActivityStale   = restartStaleWindow // свежая активность воркеров = туннель жив
+)
+
+func deadTunnelDue(nowMs, procStartedMs, lastActiveMs int64, lastDeadRestartAt time.Time,
+	startGrace, activityStale, cooldown time.Duration, running, paused bool) bool {
+	if !running || paused {
+		return false
+	}
+	if nowMs-procStartedMs <= int64(startGrace/time.Millisecond) {
+		return false
+	}
+	if lastActiveMs != 0 && nowMs-lastActiveMs <= int64(activityStale/time.Millisecond) {
+		return false
+	}
+	if !lastDeadRestartAt.IsZero() && time.Since(lastDeadRestartAt) < cooldown {
+		return false
+	}
+	return true
+}
+
+// requestDeadRestart — наружный вызов (без взятого tunnelMu): сам берёт
+// блокировку. Возвращает true, если рестарт действительно запущен.
+func (a *App) requestDeadRestart(reason string) bool {
+	a.tunnelMu.Lock()
+	defer a.tunnelMu.Unlock()
+	return a.requestDeadRestartLocked(reason)
+}
+
+// requestDeadRestartLocked — для вызовов из checkCircuitBreaker (там tunnelMu уже
+// взят). При отказе сбрасывает подозрение (deadlineWorkers): активность/кулдаун
+// означают, что туннель скорее жив, и следующая серия ошибок наберётся заново.
+func (a *App) requestDeadRestartLocked(reason string) bool {
+	if !deadTunnelDue(time.Now().UnixMilli(), a.procStartedAt, a.lastActiveAt, a.lastDeadRestartAt,
+		deadStartGrace, deadActivityStale, deadRestartCooldown, a.tunnelRunning, a.tunnelPaused) {
+		a.deadlineWorkers = nil
+		return false
+	}
+	a.lastDeadRestartAt = time.Now()
+	a.deadlineWorkers = nil
+	go a.ensureRestart(reason)
+	return true
 }
 
 func (a *App) handleCritical(msg string) {
@@ -1598,12 +1656,12 @@ func (a *App) restartTunnel() {
 
 // pingLoop — liveness-проба туннеля: раз в 5 секунд честный dial через
 // WireGuard (строго через туннель) к cp.cloudflare.com:80. Успех → отдаём
-// задержку в UI. N подряд провалов при работающем, не на паузе туннеле
-// означают «соединение мертво» — перезапускаем через ensureRestart
-// (single-flight + лимит попыток).
+// задержку в UI. Провалы считаются подряд; решение о рестарте принимает
+// requestDeadRestart (стартовый грейс, свежая активность воркеров и кулдаун
+// защищают живой, но «флапающий» туннель от постоянных реконнектов).
 const (
 	pingProbeTimeout  = 4 * time.Second
-	pingFailToRestart = 3
+	pingFailToRestart = 5
 )
 
 func deadTunnelOnPingFails(failCount int) bool {
@@ -1642,8 +1700,12 @@ func (a *App) pingLoop(stop chan struct{}) {
 			failCount++
 			if deadTunnelOnPingFails(failCount) {
 				a.log("⚠ Пинг через туннель не проходит — соединение мертво. Перезапуск...", "warn")
-				go a.ensureRestart("Туннель не пропускает трафик (нет пинга)")
-				return
+				if a.requestDeadRestart("Туннель не пропускает трафик (нет пинга)") {
+					return // рестарт запущен — старый pingLoop гасится вместе с процессом
+				}
+				// Грейс/кулдаун/свежая активность: туннель не рестартуем сейчас,
+				// ждём следующую серию провалов (не спамим попытками каждый тик).
+				failCount = 0
 			}
 		}
 	}

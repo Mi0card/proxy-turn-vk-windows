@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDeadlineBurstLimit(t *testing.T) {
 	cases := []struct {
@@ -55,13 +58,54 @@ func TestDeadTunnelOnPingFails(t *testing.T) {
 	}{
 		{0, false},
 		{1, false},
-		{2, false},
-		{3, true},
-		{4, true},
+		{4, false}, // 4 из 5 — ещё не мёртв
+		{5, true},
+		{6, true},
 	}
 	for _, c := range cases {
 		if got := deadTunnelOnPingFails(c.failCount); got != c.want {
 			t.Errorf("deadTunnelOnPingFails(%d)=%v, want %v", c.failCount, got, c.want)
 		}
+	}
+}
+
+func TestDeadTunnelDue(t *testing.T) {
+	now := time.Now().UnixMilli()
+	ms := func(d time.Duration) int64 { return int64(d / time.Millisecond) }
+
+	cases := []struct {
+		name          string
+		procStartedMs int64         // от now назад
+		lastActiveMs  int64         // от now назад; -1 = никогда (0)
+		cooldownAgo   time.Duration // время с последнего dead-рестарта; 0 = не было
+		running       bool
+		paused        bool
+		want          bool
+	}{
+		{"dead: давно стартовал, активности не было", ms(10 * time.Minute), -1, 0, true, false, true},
+		{"dead: активность устарела", ms(10 * time.Minute), ms(5 * time.Minute), 0, true, false, true},
+		{"startup grace ещё не прошёл", ms(30 * time.Second), -1, 0, true, false, false},
+		{"свежая активность — туннель жив", ms(10 * time.Minute), ms(30 * time.Second), 0, true, false, false},
+		{"в кулдауне после dead-рестарта", ms(10 * time.Minute), -1, 1 * time.Minute, true, false, false},
+		{"кулдаун истёк", ms(10 * time.Minute), -1, 4 * time.Minute, true, false, true},
+		{"на паузе", ms(10 * time.Minute), -1, 0, true, true, false},
+		{"туннель остановлен", ms(10 * time.Minute), -1, 0, false, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			procStarted := now - c.procStartedMs
+			lastActive := int64(0)
+			if c.lastActiveMs >= 0 {
+				lastActive = now - c.lastActiveMs
+			}
+			var lastRestart time.Time
+			if c.cooldownAgo > 0 {
+				lastRestart = time.Now().Add(-c.cooldownAgo)
+			}
+			if got := deadTunnelDue(now, procStarted, lastActive, lastRestart,
+				deadStartGrace, deadActivityStale, deadRestartCooldown, c.running, c.paused); got != c.want {
+				t.Errorf("deadTunnelDue = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

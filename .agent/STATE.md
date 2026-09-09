@@ -6,8 +6,9 @@
 
 Session: 12
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: S12 committed (44a36aa); qwdtt://config import added (parse→profile, like Android upstream) — uncommitted
-Next: commit qwdtt:// import; I1 open (Linux-only server tests)
+Active: dead-tunnel auto-restart made conservative (grace 90s, stale-activity gate, 3-min cooldown,
+       ping threshold 5) — v0.3.0.1, about to commit+push
+Next: commit+push v0.3.0.1; I1 open (Linux-only server tests)
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -25,12 +26,11 @@ Blocked: none
   SaveConfig keeps it when empty (app.go). Do not repurpose that key.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
-- S12 cont: qwdtt://config import (App.ParseQwdtt + frontend importQwdtt → profile save/activate;
-  peer без порта → :56000; forms qwdtt://config и qwdtt:config; tests). Uncommitted.
-- S12: fingerprint switching removed (GUI select, app.go arg, go_client flag/TLS-map, frontend profiles);
-  dead-tunnel auto-restart added (all-workers context-deadline burst + ping-failure probe), always-on
-  via ensureRestart; committed 44a36aa.
-- S11: go_client & server_src replaced with upstream SpaceNeuroX; root build/test green.
+- S12 cont: dead-tunnel рестарт сделан консервативным (жалоба «постоянно реконнектит»): единый
+  гейт requestDeadRestart — grace 90s, активность воркеров <2 мин блокирует, кулдаун 3 мин
+  (не сбрасывается активностью); ping-порог 3→5. Тесты. v0.3.0.1.
+- S12: qwdtt://config импорт профиля (ParseQwdtt + importQwdtt), коммит f0bb564 v0.3.0.0.
+- S12: fingerprint удалён + dead-tunnel авто-рестарт добавлен, коммит 44a36aa.
 - S10: app.go finalizeDone channel — TunnelStop + quitApp wait for finalizeTunnel (5s timeout).
 
 ## Recently audited (cleared — stop re-litigating)
