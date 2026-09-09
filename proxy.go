@@ -54,7 +54,7 @@ func wgDialStrict(network, addr string) (net.Conn, error) {
 
 // wgDialStrictTimeout — как wgDialStrict, но с заданным таймаутом диалога.
 // Нужен liveness-пробе туннеля (pingLoop): 30-секундный дефолт слишком долог
-// для детекта «мёртвого» соединения с периодом опроса 5 секунд.
+// для измерения задержки с периодом опроса 5 секунд.
 func wgDialStrictTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
 	wgTun.mu.Lock()
 	tnet := wgTun.tnet

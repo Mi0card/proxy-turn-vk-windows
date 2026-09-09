@@ -51,24 +51,6 @@ func TestNoteWorkerDeadlineSingleWorker(t *testing.T) {
 	}
 }
 
-func TestDeadTunnelOnPingFails(t *testing.T) {
-	cases := []struct {
-		failCount int
-		want      bool
-	}{
-		{0, false},
-		{1, false},
-		{4, false}, // 4 из 5 — ещё не мёртв
-		{5, true},
-		{6, true},
-	}
-	for _, c := range cases {
-		if got := deadTunnelOnPingFails(c.failCount); got != c.want {
-			t.Errorf("deadTunnelOnPingFails(%d)=%v, want %v", c.failCount, got, c.want)
-		}
-	}
-}
-
 func TestDeadTunnelDue(t *testing.T) {
 	now := time.Now().UnixMilli()
 	ms := func(d time.Duration) int64 { return int64(d / time.Millisecond) }

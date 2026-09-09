@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.0.1"
+const AppVersion = "0.3.0.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1467,11 +1467,11 @@ func (a *App) noteWorkerDeadline(workerID int) bool {
 }
 
 // ── Детектор «мёртвый туннель»: единая точка принятия решения ────────────────
-// Оба детектора (все воркеры с context deadline exceeded и liveness-проба пинга)
-// зовут requestDeadRestart*. Чтобы не рестартовать живой, но флапающий туннель,
-// рестарт разрешён только когда туннель работает, не на паузе, уже прошёл
-// стартовую раскачку, давно не видел активности воркеров и рестарты по «смерти»
-// не упираются в кулдаун (кулдаун не сбрасывается активностью — иначе петля).
+// Детектор (все воркеры с context deadline exceeded) зовёт requestDeadRestartLocked.
+// Чтобы не рестартовать живой, но флапающий туннель, рестарт разрешён только
+// когда туннель работает, не на паузе, уже прошёл стартовую раскачку, давно не
+// видел активности воркеров и рестарты по «смерти» не упираются в кулдаун
+// (кулдаун не сбрасывается активностью — иначе петля).
 const (
 	deadRestartCooldown = 3 * time.Minute    // не чаще одного рестарта по «смерти»
 	deadStartGrace      = 90 * time.Second   // не судим туннель первые 90 с после старта
@@ -1493,14 +1493,6 @@ func deadTunnelDue(nowMs, procStartedMs, lastActiveMs int64, lastDeadRestartAt t
 		return false
 	}
 	return true
-}
-
-// requestDeadRestart — наружный вызов (без взятого tunnelMu): сам берёт
-// блокировку. Возвращает true, если рестарт действительно запущен.
-func (a *App) requestDeadRestart(reason string) bool {
-	a.tunnelMu.Lock()
-	defer a.tunnelMu.Unlock()
-	return a.requestDeadRestartLocked(reason)
 }
 
 // requestDeadRestartLocked — для вызовов из checkCircuitBreaker (там tunnelMu уже
@@ -1654,24 +1646,16 @@ func (a *App) restartTunnel() {
 	}
 }
 
-// pingLoop — liveness-проба туннеля: раз в 5 секунд честный dial через
-// WireGuard (строго через туннель) к cp.cloudflare.com:80. Успех → отдаём
-// задержку в UI. Провалы считаются подряд; решение о рестарте принимает
-// requestDeadRestart (стартовый грейс, свежая активность воркеров и кулдаун
-// защищают живой, но «флапающий» туннель от постоянных реконнектов).
-const (
-	pingProbeTimeout  = 4 * time.Second
-	pingFailToRestart = 5
-)
-
-func deadTunnelOnPingFails(failCount int) bool {
-	return failCount >= pingFailToRestart
-}
+// pingLoop — liveness-проба туннеля (только измерение, без рестарта): раз в
+// 5 секунд честный dial через WireGuard (строго через туннель) к
+// cp.cloudflare.com:80. Успех → отдаём задержку в UI. Провалы не считаются и
+// ни к чему не приводят — решение о рестарте принимает только детектор по
+// таймаутам всех воркеров (requestDeadRestartLocked).
+const pingProbeTimeout = 4 * time.Second
 
 func (a *App) pingLoop(stop chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	failCount := 0
 	for {
 		select {
 		case <-stop:
@@ -1682,31 +1666,18 @@ func (a *App) pingLoop(stop chan struct{}) {
 			paused := a.tunnelPaused
 			a.tunnelMu.Unlock()
 
-			// Туннель остановлен/на паузе или WG ещё не поднят — не считаем.
+			// Туннель остановлен/на паузе или WG ещё не поднят — не пингуем.
 			if !running || paused || !WGTunnelActive() {
-				failCount = 0
 				continue
 			}
 
 			start := time.Now()
 			c, err := wgDialStrictTimeout("tcp", "cp.cloudflare.com:80", pingProbeTimeout)
-			if err == nil {
-				c.Close()
-				failCount = 0
-				runtime.EventsEmit(a.ctx, "tunnel:ping", time.Since(start).Milliseconds())
+			if err != nil {
 				continue
 			}
-
-			failCount++
-			if deadTunnelOnPingFails(failCount) {
-				a.log("⚠ Пинг через туннель не проходит — соединение мертво. Перезапуск...", "warn")
-				if a.requestDeadRestart("Туннель не пропускает трафик (нет пинга)") {
-					return // рестарт запущен — старый pingLoop гасится вместе с процессом
-				}
-				// Грейс/кулдаун/свежая активность: туннель не рестартуем сейчас,
-				// ждём следующую серию провалов (не спамим попытками каждый тик).
-				failCount = 0
-			}
+			c.Close()
+			runtime.EventsEmit(a.ctx, "tunnel:ping", time.Since(start).Milliseconds())
 		}
 	}
 }

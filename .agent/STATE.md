@@ -4,11 +4,12 @@
      Contradicts git log / the journal (a session died before END)? Trust git: rebuild this
      file from the last journal entry + `git log -5`, note the crash in the journal. -->
 
-Session: 12
+Session: 13
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: dead-tunnel auto-restart made conservative (grace 90s, stale-activity gate, 3-min cooldown,
-       ping threshold 5) — v0.3.0.1, about to commit+push
-Next: commit+push v0.3.0.1; I1 open (Linux-only server tests)
+Active: ping-based dead-tunnel restart (detector B) DROPPED — pingLoop is measure-only now
+       (5s tick, 4s strict probe, tunnel:ping UI event); restart only via all-worker deadline
+       timeout (detector A). v0.3.0.2, about to commit+push
+Next: commit+push v0.3.0.2; I1 open (Linux-only server tests)
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -26,12 +27,13 @@ Blocked: none
   SaveConfig keeps it when empty (app.go). Do not repurpose that key.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
+- S13: ping-based dead-tunnel рестарт (детектор B) убран — pingLoop только мерит (5с, проба 4с,
+  событие tunnel:ping); рестарт по «смерти» остался только по таймауту всех воркеров (детектор A).
+  Тест TestDeadTunnelOnPingFails удалён, README/proxy.go-комментарии поправлены. v0.3.0.2.
 - S12 cont: dead-tunnel рестарт сделан консервативным (жалоба «постоянно реконнектит»): единый
   гейт requestDeadRestart — grace 90s, активность воркеров <2 мин блокирует, кулдаун 3 мин
   (не сбрасывается активностью); ping-порог 3→5. Тесты. v0.3.0.1.
 - S12: qwdtt://config импорт профиля (ParseQwdtt + importQwdtt), коммит f0bb564 v0.3.0.0.
-- S12: fingerprint удалён + dead-tunnel авто-рестарт добавлен, коммит 44a36aa.
-- S10: app.go finalizeDone channel — TunnelStop + quitApp wait for finalizeTunnel (5s timeout).
 
 ## Recently audited (cleared — stop re-litigating)
 - Backend startup, config schema, build pipeline: no debt found. S5 re-checked DECISIONS: no `(assumed)` lines.
