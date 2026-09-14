@@ -3,6 +3,8 @@
 # Cap 50 active lines; maintain.md moves superseded/expired ones to the Archive section.
 # Format: `D<n> <YYYY-MM-DD> [scope] decision — why. (Supersedes D<m>.)`
 
+- D15 2026-09-10 [frontend] UI field defaults live in HTML as the single source; JS captures them
+  into `DEFAULTS` at load (main.js) instead of duplicating literals — prevents HTML↔JS drift (I19, S15).
 - D14 2026-09-09 [engine, user] fingerprint feature dropped (GUI + app.go + go_client): upstream
   has no TLS-fingerprint switching (fixed Chrome_146), so the local layer shrank to GOOS=windows
   build fixes only — fewer patch anchors, sync drifts less. (Supersedes the fingerprint half of D13.)

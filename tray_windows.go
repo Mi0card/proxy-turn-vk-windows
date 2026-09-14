@@ -25,7 +25,6 @@ var (
 	procRegisterClassExW    = user32.NewProc("RegisterClassExW")
 	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
 	procDefWindowProcW      = user32.NewProc("DefWindowProcW")
-	procDestroyWindow       = user32.NewProc("DestroyWindow")
 	procPostQuitMessage     = user32.NewProc("PostQuitMessage")
 	procGetMessageW         = user32.NewProc("GetMessageW")
 	procTranslateMessage    = user32.NewProc("TranslateMessage")
@@ -77,7 +76,6 @@ const (
 
 	imageIcon      = 1
 	lrDefaultColor = 0x00000000
-	iconSmall      = 0
 
 	notifyIconDataV2Size = 952
 )

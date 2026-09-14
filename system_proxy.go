@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -110,36 +111,45 @@ func (a *App) SystemProxyEnable() string {
 
 	// Запускаем HTTP-прокси (без auth) на этом листенере.
 	handler := newSysProxyHandler()
-	srv := &http.Server{Handler: handler}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 30 * time.Second}
 	go srv.Serve(ln)
 	a.sysProxyMu.Lock()
 	a.sysProxyLn = ln
 	a.sysProxySrv = srv
+	a.sysProxyHTTP = handler
 	a.sysProxyMu.Unlock()
+
+	// cleanup закрывает листенер, сервер и пул соединений транспорта и
+	// обнуляет состояние — чтобы не оставить висящий листенер/утечку.
+	cleanup := func() {
+		srv.Close()
+		handler.Close()
+		a.sysProxyMu.Lock()
+		a.sysProxyLn, a.sysProxySrv, a.sysProxyHTTP = nil, nil, nil
+		a.sysProxyMu.Unlock()
+	}
 
 	// Снимаем текущее состояние WinINET — для восстановления при отключении/крэше.
 	cur, err := sysProxyRead()
 	if err != nil {
-		srv.Close()
-		a.sysProxyMu.Lock()
-		a.sysProxyLn, a.sysProxySrv = nil, nil
-		a.sysProxyMu.Unlock()
+		cleanup()
 		return "чтение настроек прокси: " + err.Error()
 	}
 	if err := a.saveSysProxyBackup(cur); err != nil {
-		srv.Close()
-		a.sysProxyMu.Lock()
-		a.sysProxyLn, a.sysProxySrv = nil, nil
-		a.sysProxyMu.Unlock()
+		cleanup()
 		return "сохранение бэкапа: " + err.Error()
 	}
 
 	if err := sysProxyApplyStatic(proxyAddr, sysProxyOverride); err != nil {
-		srv.Close()
-		a.sysProxyMu.Lock()
-		a.sysProxyLn, a.sysProxySrv = nil, nil
-		a.sysProxyMu.Unlock()
-		a.clearSysProxyBackup()
+		cleanup()
+		// Частично применённые настройки могли остаться — откатываем к снятому
+		// состоянию. Если откат не удался, бэкап НЕ удаляем: его подхватит
+		// восстановление при следующем старте.
+		if rerr := sysProxyRestore(cur); rerr != nil {
+			a.socksLog("⚠ Не удалось откатить настройки прокси: "+rerr.Error()+". Бэкап сохранён для восстановления при старте.", "error")
+		} else {
+			a.clearSysProxyBackup()
+		}
 		return "применение: " + err.Error()
 	}
 
@@ -162,8 +172,10 @@ func (a *App) SystemProxyDisable() {
 	a.sysProxyMu.Lock()
 	srv := a.sysProxySrv
 	ln := a.sysProxyLn
+	handler := a.sysProxyHTTP
 	a.sysProxySrv = nil
 	a.sysProxyLn = nil
+	a.sysProxyHTTP = nil
 	a.sysProxyMu.Unlock()
 	if srv != nil {
 		srv.Close() // прерывает все in-flight соединения
@@ -171,10 +183,14 @@ func (a *App) SystemProxyDisable() {
 	if ln != nil {
 		ln.Close()
 	}
+	handler.Close() // закрывает idle-коннекты пула (srv.Close() их не трогает)
 
 	if s, ok := a.loadSysProxyBackup(); ok {
-		sysProxyRestore(s)
-		a.clearSysProxyBackup()
+		if err := sysProxyRestore(s); err != nil {
+			a.socksLog("⚠ Не удалось восстановить настройки системного прокси: "+err.Error()+". Бэкап сохранён.", "error")
+		} else {
+			a.clearSysProxyBackup()
+		}
 	}
 	wasOn := a.sysProxyOn.Swap(false)
 

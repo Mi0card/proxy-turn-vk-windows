@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/base64"
+	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 // ── route ─────────────────────────────────────────────────────────────────────
@@ -236,4 +240,122 @@ func TestParseDNSOverride(t *testing.T) {
 	if got := ParseDNSOverride("1.1.1.1"); got[0] != netip.MustParseAddr("1.1.1.1") {
 		t.Errorf("ParseDNSOverride(1.1.1.1) = %v", got)
 	}
+}
+
+// ── Общие helper'ы проксирования (I16/I21) ───────────────────────────────────
+
+func TestCopyHeader(t *testing.T) {
+	src := http.Header{
+		"X-A": {"1", "2"},
+		"X-B": {"v"},
+	}
+	dst := http.Header{"X-A": {"pre"}}
+	copyHeader(dst, src)
+	if got := dst.Values("X-A"); len(got) != 3 || got[0] != "pre" || got[1] != "1" || got[2] != "2" {
+		t.Fatalf("copyHeader X-A = %v, ожидалось [pre 1 2]", got)
+	}
+	if got := dst.Get("X-B"); got != "v" {
+		t.Fatalf("copyHeader X-B = %q, ожидалось v", got)
+	}
+}
+
+func TestStripHopByHopHeaders(t *testing.T) {
+	h := http.Header{}
+	for _, name := range hopByHopHeaders {
+		h.Set(name, "x")
+	}
+	h.Set("Content-Type", "application/json")
+	h.Set("Authorization", "keep")
+
+	stripHopByHopHeaders(h)
+
+	for _, name := range hopByHopHeaders {
+		if h.Get(name) != "" {
+			t.Errorf("hop-by-hop %q не удалён", name)
+		}
+	}
+	if h.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type не должен удаляться")
+	}
+	if h.Get("Authorization") != "keep" {
+		t.Errorf("Authorization не должен удаляться")
+	}
+}
+
+func TestRelayBidirectional(t *testing.T) {
+	a1, a2 := net.Pipe()
+	b1, b2 := net.Pipe()
+	defer a2.Close()
+	defer b2.Close()
+	defer b1.Close()
+
+	done := make(chan struct{})
+	go func() { relayBidirectional(a2, b2, 5*time.Second); close(done) }()
+
+	// a1 → b1
+	go a1.Write([]byte("ping"))
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(b1, buf); err != nil {
+		t.Fatalf("чтение a→b: %v", err)
+	}
+	if string(buf) != "ping" {
+		t.Fatalf("a→b = %q, ожидалось ping", buf)
+	}
+
+	// b1 → a1
+	go b1.Write([]byte("pong"))
+	if _, err := io.ReadFull(a1, buf); err != nil {
+		t.Fatalf("чтение b→a: %v", err)
+	}
+	if string(buf) != "pong" {
+		t.Fatalf("b→a = %q, ожидалось pong", buf)
+	}
+
+	// Закрытие одной стороны должно завершить релей (обе копирующие горутины
+	// разблокируются по cancel()).
+	a1.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relayBidirectional не завершился после закрытия соединения")
+	}
+}
+
+// ── sysProxyHandler (I10/I21) ────────────────────────────────────────────────
+
+// Без активного WireGuard-туннеля wgDialStrict всегда падает — оба
+// обработчика обязаны вернуть 502, а не висеть/паниковать.
+func TestSysProxyHandlerConnectNoTunnel(t *testing.T) {
+	h := newSysProxyHandler()
+	req := httptest.NewRequest(http.MethodConnect, "http://example.invalid/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("CONNECT без туннеля: статус %d, ожидалось 502", rec.Code)
+	}
+}
+
+func TestSysProxyHandlerHTTPNoTunnel(t *testing.T) {
+	h := newSysProxyHandler()
+	req := httptest.NewRequest(http.MethodGet, "http://example.invalid/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("HTTP без туннеля: статус %d, ожидалось 502", rec.Code)
+	}
+}
+
+func TestNewSysProxyHandlerClose(t *testing.T) {
+	h := newSysProxyHandler()
+	if h.transport == nil {
+		t.Fatal("transport не создан")
+	}
+	if h.transport.IdleConnTimeout <= 0 {
+		t.Fatalf("IdleConnTimeout = %v, ожидался положительный", h.transport.IdleConnTimeout)
+	}
+	h.Close() // не должно паниковать
+	// nil-получатель тоже безопасен (SystemProxyDisable зовёт handler.Close()
+	// даже когда прокси не был включён).
+	var nilH *sysProxyHandler
+	nilH.Close()
 }

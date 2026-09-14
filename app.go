@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.0.2"
+const AppVersion = "0.3.0.3"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -169,18 +169,14 @@ type App struct {
 	captchaOpen atomic.Bool
 
 	// Системный прокси (WinINET)
-	sysProxyMu  sync.Mutex // защищает sysProxyLn/sysProxySrv от гонки Enable/Disable
-	sysProxyOn  atomic.Bool
-	sysProxyLn  net.Listener // отдельный HTTP-прокси без auth
-	sysProxySrv *http.Server // для graceful close
+	sysProxyMu   sync.Mutex // защищает sysProxyLn/sysProxySrv/sysProxyHTTP от гонки Enable/Disable
+	sysProxyOn   atomic.Bool
+	sysProxyLn   net.Listener     // отдельный HTTP-прокси без auth
+	sysProxySrv  *http.Server     // для graceful close
+	sysProxyHTTP *sysProxyHandler // транспорт-пул, закрывается при выключении
 
 	// Прокси (SOCKS5 + HTTP)
-	proxy      *ProxyServer
-	socksStats struct {
-		mu     sync.Mutex
-		active int
-		total  int
-	}
+	proxy *ProxyServer
 
 	// Маршрутизация по правилам (ruleset)
 	ruleset *RulesetManager
@@ -286,9 +282,12 @@ func (a *App) startup(ctx context.Context) {
 	// Крэш-восстановление: если остался бэкап системного прокси, значит прошлый
 	// сеанс завершился аварийно с включённым перенаправлением — возвращаем настройки.
 	if s, ok := a.loadSysProxyBackup(); ok {
-		sysProxyRestore(s)
-		a.clearSysProxyBackup()
-		a.log("Обнаружен и восстановлен системный прокси от прошлого сеанса.", "warn")
+		if err := sysProxyRestore(s); err != nil {
+			a.log("⚠ Не удалось восстановить системный прокси прошлого сеанса: "+err.Error()+". Бэкап сохранён.", "error")
+		} else {
+			a.clearSysProxyBackup()
+			a.log("Обнаружен и восстановлен системный прокси от прошлого сеанса.", "warn")
+		}
 	}
 
 	// Трей: иконка создаётся на всех поддерживаемых платформах (Windows, macOS).
@@ -711,10 +710,6 @@ func (a *App) SetTheme(theme string) {
 func (a *App) GetClientExeExists() bool {
 	_, err := os.Stat(a.clientExe)
 	return err == nil
-}
-
-func (a *App) GetClientExePath() string {
-	return a.clientExe
 }
 
 // ── Parse wdtt:// & qwdtt://config ─────────────────────────────────────────────
@@ -1299,16 +1294,8 @@ func (a *App) readStream(r io.Reader, startTs time.Time) {
 		}
 
 		// Заголовок этапа — только при смене
-		parallelStages := map[string]bool{
-			"Handshake": true, "TURN relay": true,
-			"Подключение": true, "Воркеры": true,
-		}
 		if label != "" && label != lastStage {
-			if !parallelStages[label] {
-				a.log("◆  "+label, level)
-			} else if label != lastStage {
-				a.log("◆  "+label, level)
-			}
+			a.log("◆  "+label, level)
 			lastStage = label
 		}
 

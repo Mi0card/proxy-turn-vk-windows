@@ -32,20 +32,6 @@ type wgTunnel struct {
 
 var wgTun = &wgTunnel{}
 
-func wgDial(network, addr string) (net.Conn, error) {
-	wgTun.mu.Lock()
-	tnet := wgTun.tnet
-	active := wgTun.active
-	wgTun.mu.Unlock()
-
-	if active && tnet != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		return tnet.DialContext(ctx, network, addr)
-	}
-	return net.DialTimeout(network, addr, 30*time.Second)
-}
-
 // wgDialStrict — только через туннель, без fallback на прямое соединение.
 // Используется системным прокси: нет туннеля → ошибка → браузер получает 502.
 func wgDialStrict(network, addr string) (net.Conn, error) {
@@ -298,10 +284,16 @@ func NewProxyServer(logFn func(msg, lv string), statsFn func(ProxyStats)) *Proxy
 				return net.DialTimeout(network, addr, 30*time.Second)
 			},
 		},
-		transportTunnel: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return wgDialStrict(network, addr)
-			},
+		transportTunnel: newTunnelTransport(),
+	}
+}
+
+// newTunnelTransport создаёт HTTP-транспорт, диалящий строго через WireGuard
+// netstack (без fallback на прямое соединение).
+func newTunnelTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return wgDialStrict(network, addr)
 		},
 	}
 }
@@ -703,18 +695,7 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 
 		// Idle-timeout: дедлайн сбрасывается при каждой активности,
 		// долгие стримы не обрываются по абсолютному дедлайну.
-		idle := 10 * time.Minute
-		ci := &idleConn{Conn: clientConn, idle: idle}
-		ri := &idleConn{Conn: remote, idle: idle}
-		ci.SetDeadline(time.Now().Add(idle))
-		ri.SetDeadline(time.Now().Add(idle))
-
-		// П.6 — context для graceful cancel
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go func() { defer cancel(); io.Copy(ri, ci) }()
-		go func() { defer cancel(); io.Copy(ci, ri) }()
-		<-ctx.Done()
+		relayBidirectional(clientConn, remote, 10*time.Minute)
 		return
 	}
 
@@ -732,13 +713,7 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	r.RequestURI = ""
 	// Удаляем hop-by-hop заголовки (RFC 2616 §13.5.1) — они не должны
 	// пересылаться через прокси.
-	for _, h := range []string{
-		"Proxy-Connection", "Connection", "Keep-Alive",
-		"TE", "Trailer", "Transfer-Encoding", "Upgrade",
-		"Proxy-Authenticate", "Proxy-Authorization",
-	} {
-		r.Header.Del(h)
-	}
+	stripHopByHopHeaders(r.Header)
 	via := "туннель"
 	if route.policy == PolicyDirect {
 		via = "напрямую"
@@ -755,11 +730,7 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		return
 	}
 	defer resp.Body.Close()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
+	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 	p.log(fmt.Sprintf("→ %s %s [%s]", r.Method, r.URL.Host, via), "dim")
@@ -789,6 +760,45 @@ func (c *idleConn) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// hopByHopHeaders — заголовки, которые не должны пересылаться через прокси
+// (RFC 2616 §13.5.1). Общий список для обоих HTTP-обработчиков.
+var hopByHopHeaders = []string{
+	"Proxy-Connection", "Connection", "Keep-Alive",
+	"TE", "Trailer", "Transfer-Encoding", "Upgrade",
+	"Proxy-Authenticate", "Proxy-Authorization",
+}
+
+func stripHopByHopHeaders(h http.Header) {
+	for _, name := range hopByHopHeaders {
+		h.Del(name)
+	}
+}
+
+// copyHeader копирует все значения src в dst (Add, не Set).
+func copyHeader(dst, src http.Header) {
+	for k, vv := range src {
+		for _, v := range vv {
+			dst.Add(k, v)
+		}
+	}
+}
+
+// relayBidirectional проксирует трафик между двумя соединениями, пока одна из
+// сторон не закроется. Оба соединения оборачиваются в idleConn — долгие стримы
+// не обрываются по абсолютному дедлайну, а «мёртвые» соединения отмирают.
+func relayBidirectional(a, b net.Conn, idle time.Duration) {
+	ai := &idleConn{Conn: a, idle: idle}
+	bi := &idleConn{Conn: b, idle: idle}
+	ai.SetDeadline(time.Now().Add(idle))
+	bi.SetDeadline(time.Now().Add(idle))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { defer cancel(); io.Copy(bi, ai) }()
+	go func() { defer cancel(); io.Copy(ai, bi) }()
+	<-ctx.Done()
+}
+
 // ── System Proxy handler (без auth, отдельный листенер) ──────────────────────
 
 // sysProxyHandler — минимальный HTTP-прокси без аутентификации.
@@ -798,12 +808,18 @@ type sysProxyHandler struct {
 }
 
 func newSysProxyHandler() *sysProxyHandler {
-	return &sysProxyHandler{
-		transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return wgDialStrict(network, addr)
-			},
-		},
+	t := newTunnelTransport()
+	// Ограничиваем время жизни idle-соединений: системный прокси включают и
+	// выключают, пул не должен копить «вечные» коннекты между циклами.
+	t.IdleConnTimeout = 90 * time.Second
+	return &sysProxyHandler{transport: t}
+}
+
+// Close освобождает idle-соединения транспорта. srv.Close() закрывает
+// in-flight запросы, но не пул — вызывается при выключении системного прокси.
+func (h *sysProxyHandler) Close() {
+	if h != nil && h.transport != nil {
+		h.transport.CloseIdleConnections()
 	}
 }
 
@@ -831,40 +847,19 @@ func (h *sysProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request) 
 	client, _, _ := hj.Hijack()
 	defer client.Close()
 
-	// Idle-timeout вместо абсолютного дедлайна.
-	idle := 10 * time.Minute
-	ci := &idleConn{Conn: client, idle: idle}
-	ri := &idleConn{Conn: remote, idle: idle}
-	ci.SetDeadline(time.Now().Add(idle))
-	ri.SetDeadline(time.Now().Add(idle))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { defer cancel(); io.Copy(ri, ci) }()
-	go func() { defer cancel(); io.Copy(ci, ri) }()
-	<-ctx.Done()
+	relayBidirectional(client, remote, 10*time.Minute)
 }
 
 func (h *sysProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	r.RequestURI = ""
-	for _, hdr := range []string{
-		"Proxy-Connection", "Connection", "Keep-Alive",
-		"TE", "Trailer", "Transfer-Encoding", "Upgrade",
-		"Proxy-Authenticate", "Proxy-Authorization",
-	} {
-		r.Header.Del(hdr)
-	}
+	stripHopByHopHeaders(r.Header)
 	resp, err := h.transport.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
+	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }

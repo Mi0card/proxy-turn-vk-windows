@@ -46,6 +46,27 @@ const TAB_META = {
   help:    { title: 'Справка',      sub: 'Инструкции и флаги wdtt-client' },
 };
 
+// Дефолты полей берём из HTML (единственный источник правды) — иначе литералы
+// в HTML и JS расходятся. Значения захватываются до загрузки конфига.
+const DEFAULTS = (() => {
+  const v = (id, fb) => {
+    const el = document.getElementById(id);
+    return el && el.value !== undefined && el.value !== '' ? el.value : fb;
+  };
+  return {
+    workers:  v('n-workers', '9'),
+    listen:   v('listen', '127.0.0.1:9000'),
+    pxHost:   v('px-host', '127.0.0.1'),
+    pxSocks:  v('px-port', '1080'),
+    pxHttp:   v('px-http-port', '1081'),
+    captcha:  v('captcha-mode', 'auto'),
+    obfs:     v('obfs-mode', 'audio'),
+    sshPort:  v('d-port', '22'),
+    wgPort:   v('d-wg', '51820'),
+    wdttPort: v('d-wdtt', '56000'),
+  };
+})();
+
 function setBtnLabel(btn, text) {
   if (!btn) return;
   const label = btn.querySelector('.btn-label');
@@ -68,6 +89,12 @@ function showToast(msg, lv = 'error') {
 
 // ── Busy-состояние кнопок (индикатор длительной операции) ────────────────────
 
+// Кнопки, при занятости которых шапка показывает «Загрузка...».
+const STATUS_BADGE_BUTTONS = new Set([
+  'btn-connect', 'btn-pause', 'btn-stop',
+  'btn-pstart', 'btn-pstop', 'btn-deploy', 'btn-undeploy',
+]);
+
 function setBusy(btn, busy, busyText) {
   if (!btn) return;
   const label = btn.querySelector('.btn-label');
@@ -83,12 +110,14 @@ function setBusy(btn, busy, busyText) {
     btn.disabled = false;
     btn.classList.remove('is-busy');
   }
-  // Обновляем статус бадж для отображения загрузки
-  if (btn.id === 'btn-connect' || btn.id === 'btn-pause' || btn.id === 'btn-stop' || 
-      btn.id === 'btn-pstart' || btn.id === 'btn-pstop' || btn.id === 'btn-deploy' || btn.id === 'btn-undeploy') {
-    const statusEl = document.getElementById('status-badge');
-    if (statusEl && busy) {
-      statusEl.innerHTML = '<span class="dot"></span> Загрузка...';
+  // Статус-бадж: «Загрузка...» на время операции, затем фактическое состояние
+  // (иначе бейдж залипает после deploy/undeploy/старта прокси).
+  if (STATUS_BADGE_BUTTONS.has(btn.id)) {
+    if (busy) {
+      const statusEl = document.getElementById('status-badge');
+      if (statusEl) statusEl.innerHTML = '<span class="dot"></span> Загрузка...';
+    } else {
+      updateStatusBadge();
     }
   }
 }
@@ -96,19 +125,15 @@ function setBusy(btn, busy, busyText) {
 // ── Инициализация ──────────────────────────────────────────────────────────────────────
 
 window.addEventListener('load', async () => {
-  initTheme();
+  initTheme().catch(e => console.error('initTheme:', e));
 
-  const sysProxySupported = await window.go.main.App.SystemProxySupported();
-  if (!sysProxySupported) {
-    const row = document.getElementById('sysproxy-row');
-    if (row) row.style.display = 'none';
-  }
-  // Вкладки
+  // Вкладки — не зависят от бэкенда.
   document.querySelectorAll('.tab').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  // Подписка на события от Go
+  // Подписка на события от Go — критичный минимум: регистрируем до любых
+  // бэкенд-вызовов, чтобы UI ожил даже при ошибке загрузки конфига.
   window.runtime.EventsOn('log', onLog);
   window.runtime.EventsOn('tunnel:status', onTunnelStatus);
   window.runtime.EventsOn('tunnel:workers', onWorkers);
@@ -124,13 +149,28 @@ window.addEventListener('load', async () => {
   window.runtime.EventsOn('sysproxy:status', onSysProxyStatus);
   window.runtime.EventsOn('ruleset:progress', onRulesetProgress);
 
+  // Каждый бэкенд-вызов изолирован: сбой одного не обрывает инициализацию.
+  try {
+    const sysProxySupported = await window.go.main.App.SystemProxySupported();
+    if (!sysProxySupported) {
+      const row = document.getElementById('sysproxy-row');
+      if (row) row.style.display = 'none';
+    }
+  } catch (e) { console.error('SystemProxySupported:', e); }
 
   // Загружаем конфиг и заполняем поля
-  const cfg = await window.go.main.App.GetConfig();
-  loadConfig(cfg);
+  try {
+    const cfg = await window.go.main.App.GetConfig();
+    loadConfig(cfg);
+  } catch (e) {
+    console.error('GetConfig:', e);
+    log('Не удалось загрузить конфигурацию: ' + e, 'error');
+  }
 
   // Инициализируем профили подключения
-  await initProfiles();
+  try {
+    await initProfiles();
+  } catch (e) { console.error('initProfiles:', e); }
 
   // Восстанавливаем состояние кнопок прокси (если прокси уже запущен).
   try {
@@ -139,23 +179,26 @@ window.addEventListener('load', async () => {
   } catch (e) { /* SocksStatus недоступен — оставляем дефолт */ }
 
   // Статус бинарника — показываем только предупреждение, если он не найден.
-  const exeExists = await window.go.main.App.GetClientExeExists();
-  const binEl = document.getElementById('bin-status');
-  if (!exeExists) {
-    binEl.textContent = '⚠  wdtt-client.exe не найден';
-    binEl.className = 'bin-status err';
-  } else {
-    binEl.textContent = '';
-    binEl.className = 'bin-status';
-  }
+  try {
+    const exeExists = await window.go.main.App.GetClientExeExists();
+    const binEl = document.getElementById('bin-status');
+    if (!exeExists) {
+      binEl.textContent = '⚠  wdtt-client.exe не найден';
+      binEl.className = 'bin-status err';
+    } else {
+      binEl.textContent = '';
+      binEl.className = 'bin-status';
+    }
+  } catch (e) { console.error('GetClientExeExists:', e); }
 
   // Справка
-  const ver = await window.go.main.App.GetVersion();
-  document.getElementById('help-text').textContent = helpText(ver);
-  const sv = document.getElementById('sidebar-version');
-  if (sv) sv.textContent = 'v' + ver;
-
-  log('WinDTT v' + ver + ' запущен', 'success');
+  try {
+    const ver = await window.go.main.App.GetVersion();
+    document.getElementById('help-text').textContent = helpText(ver);
+    const sv = document.getElementById('sidebar-version');
+    if (sv) sv.textContent = 'v' + ver;
+    log('WinDTT v' + ver + ' запущен', 'success');
+  } catch (e) { console.error('GetVersion:', e); }
   
   // Добавляем события для поля ввода правил
   const input = document.getElementById('rr-new');
@@ -279,14 +322,14 @@ function collectConfig() {
     vk:           getVkHashes(),
     srv:          getVal('srv'),
     sec:          getVal('sec'),
-    n:            getVal('n-workers') || '9',
-    listen:       getVal('listen') || '127.0.0.1:9000',
+    n:            getVal('n-workers') || DEFAULTS.workers,
+    listen:       getVal('listen') || DEFAULTS.listen,
     captcha_mode: document.getElementById('captcha-mode').value,
-    obfs_mode:    document.getElementById('obfs-mode')?.value || 'audio',
+    obfs_mode:    document.getElementById('obfs-mode')?.value || DEFAULTS.obfs,
     device_id:    '',   // заполнится на Go-стороне
-    px_host:      getVal('px-host') || '127.0.0.1',
-    px_socks_port: getVal('px-port') || '1080',
-    px_http_port: getVal('px-http-port') || '1081',
+    px_host:      getVal('px-host') || DEFAULTS.pxHost,
+    px_socks_port: getVal('px-port') || DEFAULTS.pxSocks,
+    px_http_port: getVal('px-http-port') || DEFAULTS.pxHttp,
     px_use_auth:  document.getElementById('px-use-auth').checked,
     px_user:      getVal('px-user'),
     px_pass:      getVal('px-pass'),
@@ -318,10 +361,10 @@ function collectProfile() {
     vk:           getVkHashes(),
     srv:          getVal('srv'),
     sec:          getVal('sec'),
-    n:            getVal('n-workers') || '9',
-    listen:       getVal('listen') || '127.0.0.1:9000',
-    captcha_mode: setSel('captcha-mode', 'auto'),
-    obfs_mode:    setSel('obfs-mode', 'audio'),
+    n:            getVal('n-workers') || DEFAULTS.workers,
+    listen:       getVal('listen') || DEFAULTS.listen,
+    captcha_mode: setSel('captcha-mode', DEFAULTS.captcha),
+    obfs_mode:    setSel('obfs-mode', DEFAULTS.obfs),
   };
 }
 
@@ -546,7 +589,7 @@ async function confirmProfileModal() {
       showToast('Профиль с таким именем уже существует', 'error');
       return;
     }
-    const p = { name, vk: '', srv: '', sec: '', n: '9', listen: '127.0.0.1:9000', captcha_mode: 'auto', obfs_mode: 'audio' };
+    const p = { name, vk: '', srv: '', sec: '', n: DEFAULTS.workers, listen: DEFAULTS.listen, captcha_mode: DEFAULTS.captcha, obfs_mode: DEFAULTS.obfs };
     await window.go.main.App.SaveProfile(p);
     state.connProfiles.push(p);
     state.activeProfile = name;
@@ -640,10 +683,10 @@ async function connect() {
   const vk  = getVkHashes();
   const srv = getVal('srv').trim();
   const sec = getVal('sec').trim();
-  const n   = getVal('n-workers').trim() || '9';
-  const lst = getVal('listen').trim()    || '127.0.0.1:9000';
+  const n   = getVal('n-workers').trim() || DEFAULTS.workers;
+  const lst = getVal('listen').trim()    || DEFAULTS.listen;
   const cm  = document.getElementById('captcha-mode').value;
-  const om  = document.getElementById('obfs-mode')?.value || 'audio';
+  const om  = document.getElementById('obfs-mode')?.value || DEFAULTS.obfs;
 
   if (!vk)  { log('Введите VK хеш!',    'error'); return; }
   if (!srv) { log('Введите адрес VPS!', 'error'); return; }
@@ -808,9 +851,9 @@ function updateWorkersUI() {
 // ── SOCKS5 ────────────────────────────────────────────────────────────────────
 
 async function proxyStart() {
-  const host     = getVal('px-host')      || '127.0.0.1';
-  const s5port   = getVal('px-port')      || '1080';
-  const httpPort = getVal('px-http-port') || '1081';
+  const host     = getVal('px-host')      || DEFAULTS.pxHost;
+  const s5port   = getVal('px-port')      || DEFAULTS.pxSocks;
+  const httpPort = getVal('px-http-port') || DEFAULTS.pxHttp;
   const ua       = document.getElementById('px-use-auth').checked;
   const u        = ua ? getVal('px-user') : '';
   const pw       = ua ? getVal('px-pass') : '';
@@ -906,11 +949,8 @@ function connLog(msg, lv = 'info') {
 
 function appendConnLine({ts, msg, lv}) {
   const box = document.getElementById('conn-log-box');
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
-  const stick = isNearBottom(box);
-  box.appendChild(line);
-  if (stick && state.activeTab === 'logs' && state.activeLogTab === 'conn') {
+  const stick = appendLogEntryTo(box, ts, lv, msg);
+  if (box && stick && state.activeTab === 'logs' && state.activeLogTab === 'conn') {
     box.scrollTop = box.scrollHeight;
   }
 }
@@ -963,10 +1003,17 @@ function onTunnelPing(ms) {
 function updateStatusBadge() {
   const sb = document.getElementById('status-badge');
   if (!sb) return;
-  if (state.tunnelRunning) {
+  const dot = '<span class="dot"></span> ';
+  if (state.tunnelRunning && state.tunnelPaused) {
+    sb.innerHTML = dot + 'Туннель пауза';
+    sb.className = 'badge paused';
+  } else if (state.tunnelRunning) {
     const ping = state.lastPingMs != null ? ` ${state.lastPingMs}ms` : '';
-    sb.innerHTML = '<span class="dot"></span> Туннель' + ping;
+    sb.innerHTML = dot + 'Туннель' + ping;
     sb.className = 'badge connected';
+  } else {
+    sb.innerHTML = dot + 'Туннель выкл';
+    sb.className = 'badge disconnected';
   }
 }
 
@@ -1018,15 +1065,6 @@ function genDeployPass() {
 
 // Текущий список правил в редакторе (до сохранения).
 let routingDraft = [];
-
-function routingPolicyLabel(p) {
-  switch (p) {
-    case 'block':  return 'block (заблокировать)';
-    case 'direct': return 'direct (напрямую)';
-    case 'proxy':  return 'proxy (через туннель)';
-    default:       return 'proxy (через туннель)';
-  }
-}
 
 // Разбирает строку правила на {type, value} для отображения.
 // types: geosite/geoip (из ruleset:...), domain, domain-suffix, keyword, regex, cidr, ip.
@@ -1477,11 +1515,11 @@ async function updateAllRulesets() {
 
 async function deploy() {
   const ip   = getVal('d-ip').trim();
-  const port = getVal('d-port').trim() || '22';
+  const port = getVal('d-port').trim() || DEFAULTS.sshPort;
   const user = getVal('d-user').trim();
   const pwd  = getVal('d-pwd');
-  const wg   = getVal('d-wg').trim()   || '51820';
-  const wdtt = getVal('d-wdtt').trim() || '56000';
+  const wg   = getVal('d-wg').trim()   || DEFAULTS.wgPort;
+  const wdtt = getVal('d-wdtt').trim() || DEFAULTS.wdttPort;
 
   if (!ip || !user) { deployLog('Введите IP и пользователя!', 'error'); return; }
 
@@ -1519,11 +1557,11 @@ async function deploy() {
 
 async function undeploy() {
   const ip   = getVal('d-ip').trim();
-  const port = getVal('d-port').trim() || '22';
+  const port = getVal('d-port').trim() || DEFAULTS.sshPort;
   const user = getVal('d-user').trim();
   const pwd  = getVal('d-pwd');
-  const wg   = getVal('d-wg').trim()   || '51820';
-  const wdtt = getVal('d-wdtt').trim() || '56000';
+  const wg   = getVal('d-wg').trim()   || DEFAULTS.wgPort;
+  const wdtt = getVal('d-wdtt').trim() || DEFAULTS.wdttPort;
 
   if (!ip || !user) { deployLog('Введите IP и пользователя!', 'error'); return; }
 
@@ -1641,6 +1679,18 @@ function isNearBottom(box) {
   return box.scrollHeight - box.scrollTop - box.clientHeight < 40;
 }
 
+// Рендер одной строки лога в произвольный бокс. ts/lv/msg экранируются
+// (ts и lv тоже — они попадают в innerHTML). Возвращает true, если до
+// добавления строки скролл был у нижней границы.
+function appendLogEntryTo(box, ts, lv, msg) {
+  if (!box) return false;
+  const stick = isNearBottom(box);
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="log-ts">[${escHtml(String(ts))}]</span> <span class="log-${escAttr(String(lv))}">${escHtml(String(msg))}</span>`;
+  box.appendChild(line);
+  return stick;
+}
+
 function log(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const entry = {ts, msg, lv};
@@ -1657,12 +1707,9 @@ function onLog(entry) {
 
 function appendLogLine({ts, msg, lv}) {
   const box = document.getElementById('general-log-box');
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
-  const stick = isNearBottom(box);
-  box.appendChild(line);
+  const stick = appendLogEntryTo(box, ts, lv, msg);
   // Автопрокрутка только когда вкладка логов активна и юзер был внизу
-  if (stick && state.activeTab === 'logs' && state.activeLogTab === 'general') {
+  if (box && stick && state.activeTab === 'logs' && state.activeLogTab === 'general') {
     box.scrollTop = box.scrollHeight;
   }
 }
@@ -1804,21 +1851,13 @@ function deployLog(msg, lv = 'info') {
   const box = document.getElementById('deploy-log-box');
   if (!box) return;
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${lv}">${escHtml(msg)}</span>`;
-  const stick = isNearBottom(box);
-  box.appendChild(line);
-  if (stick) box.scrollTop = box.scrollHeight;
+  if (appendLogEntryTo(box, ts, lv, msg)) box.scrollTop = box.scrollHeight;
 }
 
 function onDeployLog(entry) {
   const box = document.getElementById('deploy-log-box');
   if (!box) return;
-  const line = document.createElement('div');
-  line.innerHTML = `<span class="log-ts">[${entry.ts}]</span> <span class="log-${entry.lv}">${escHtml(entry.msg)}</span>`;
-  const stick = isNearBottom(box);
-  box.appendChild(line);
-  if (stick) box.scrollTop = box.scrollHeight;
+  if (appendLogEntryTo(box, entry.ts, entry.lv, entry.msg)) box.scrollTop = box.scrollHeight;
 }
 
 function clearDeployLog() {

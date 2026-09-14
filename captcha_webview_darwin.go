@@ -3,7 +3,9 @@
 package main
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/progrium/darwinkit/dispatch"
 	"github.com/progrium/darwinkit/macos/appkit"
@@ -11,6 +13,11 @@ import (
 	"github.com/progrium/darwinkit/macos/webkit"
 	"github.com/progrium/darwinkit/objc"
 )
+
+// captchaWebViewTimeout — страховка от вечного ожидания результата, если окно
+// так и не создалось (например, паника в главном потоке). Решение капчи
+// пользователем укладывается в этот интервал с большим запасом.
+const captchaWebViewTimeout = 10 * time.Minute
 
 // captchaBridgeShimJS — мост JS -> Go для WKWebView. В отличие от WebView2
 // (см. captcha_webview_windows.go), где webview2.Bind("name", fn) сам создаёт
@@ -62,6 +69,12 @@ func openCaptchaWebView(redirectURI string, baseDir string, onResult func(result
 	}
 
 	dispatch.MainQueue().DispatchAsync(func() {
+		// Паника в AppKit/darwinkit не должна навсегда подвесить onResult ниже.
+		defer func() {
+			if rec := recover(); rec != nil {
+				done(fmt.Sprintf("error:captcha window: %v", rec))
+			}
+		}()
 		w := appkit.NewWindowWithSize(420, 640)
 		objc.Retain(&w)
 		w.SetTitle("WinDTT — подтверждение (капча VK)")
@@ -114,5 +127,10 @@ func openCaptchaWebView(redirectURI string, baseDir string, onResult func(result
 		webkit.LoadURL(view, redirectURI)
 	})
 
-	onResult(<-resultCh) // блокируем горутину-вызывающего, как и на Windows
+	select {
+	case result := <-resultCh:
+		onResult(result) // блокируем горутину-вызывающего, как и на Windows
+	case <-time.After(captchaWebViewTimeout):
+		onResult("error:captcha window timeout")
+	}
 }

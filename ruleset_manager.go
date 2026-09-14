@@ -583,8 +583,7 @@ func readVarint(b []byte, i int) (uint64, int) {
 // Для wireType 2 возвращает также длину и позицию данных.
 type pf struct {
 	field, wire uint64
-	start, end  int    // границы value (для wireType 2 — данные)
-	varint      uint64 // значение для wireType 0
+	start, end  int // границы value (для wireType 2 — данные)
 }
 
 // parseField читает одно поле protobuf. Возвращает nil, если за пределами.
@@ -606,10 +605,9 @@ func parseField(b []byte, i, end int) *pf {
 			f.end = end
 		}
 	} else if wt == 0 {
-		v, p2 := readVarint(b, p)
+		_, p2 := readVarint(b, p)
 		f.start = p
 		f.end = p2
-		f.varint = v
 	} else if wt == 5 {
 		f.start = p
 		f.end = p + 4

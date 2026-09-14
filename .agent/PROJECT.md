@@ -28,7 +28,7 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
 - WinINET — Windows internet settings store (registry HKCU) that browsers/Office honor.
 - ruleset — routing rule set: `domain:`, `domain-suffix:`, `keyword:`, `regex:`, `cidr:`, `ip:` and
   `ruleset:geosite-<g>`/`geoip-<g>` from v2ray protobuf dat files; policies block/direct/proxy, first match wins.
-- AppVersion — version const in app.go:29 (`0.2.10.0`); bumping it triggers the CI build.
+- AppVersion — version const in app.go:30 (`0.3.0.3`); bumping it triggers the CI build.
 - CaptchaMode / ObfsMode — per-profile tunnel options surfaced in the UI and passed to the engine.
 
 ## Landmines (cross-cutting gotchas, ≤15; area-specific ones belong in .agent/areas/)
@@ -43,8 +43,8 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
   you trigger a CI build; a commit that touches app.go without a bump won't build.
 - Deploy flow depends on the embedded wdtt-server binary & deploy.sh being fresh → they are refreshed
   by sync.yml only when upstream files change; stale engine = stale embedded server.
-- `.agent/`, `CLAUDE.md`, `AGENTS.md` are git-ignored (user's choice) → agent state is local-only,
-  not persisted through git; crash-recovery across clones won't work (journal still exists locally).
+- `.agent/`, `CLAUDE.md`, `AGENTS.md` are git-tracked (verified `git ls-files`) → agent state
+  persists through git; crash-recovery across clones works (journal + STATE are committed).
 - Rules dat-files are cached on disk (v2ray protobuf format, parsed without deps) → cache staleness
   shows up as wrong routing until "Обновить правила"; parsers live in ruleset_manager.go.
 - Cross-platform build tags matter: syscall_/captcha_/tray_ files are per-OS — keep all buildable

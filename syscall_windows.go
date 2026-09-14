@@ -90,7 +90,9 @@ func sysProxyApplyStatic(server, override string) error {
 	return nil
 }
 
-// sysProxyRestore возвращает ровно прежнее состояние реестра.
+// sysProxyRestore возвращает ровно прежнее состояние реестра. Ошибки записи
+// не проглатываются: возвращается первая из них, но попытки восстановить
+// остальные значения продолжаются (частичный откат лучше нулевого).
 func sysProxyRestore(s sysProxySnapshot) error {
 	k, err := registry.OpenKey(registry.CURRENT_USER, inetSettingsPath, registry.SET_VALUE)
 	if err != nil {
@@ -98,26 +100,39 @@ func sysProxyRestore(s sysProxySnapshot) error {
 	}
 	defer k.Close()
 
+	var firstErr error
+	record := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	// DeleteValue на отсутствующем значении — не ошибка (штатное состояние).
+	delValue := func(name string) {
+		if err := k.DeleteValue(name); err != nil && err != registry.ErrNotExist {
+			record(err)
+		}
+	}
+
 	if s.HadEnable {
-		k.SetDWordValue("ProxyEnable", s.ProxyEnable)
+		record(k.SetDWordValue("ProxyEnable", s.ProxyEnable))
 	} else {
-		k.SetDWordValue("ProxyEnable", 0)
+		record(k.SetDWordValue("ProxyEnable", 0))
 	}
 	if s.HadServer {
-		k.SetStringValue("ProxyServer", s.ProxyServer)
+		record(k.SetStringValue("ProxyServer", s.ProxyServer))
 	} else {
-		k.DeleteValue("ProxyServer")
+		delValue("ProxyServer")
 	}
 	if s.HadOverride {
-		k.SetStringValue("ProxyOverride", s.ProxyOverride)
+		record(k.SetStringValue("ProxyOverride", s.ProxyOverride))
 	} else {
-		k.DeleteValue("ProxyOverride")
+		delValue("ProxyOverride")
 	}
 	if s.HadACU {
-		k.SetStringValue("AutoConfigURL", s.AutoConfigURL)
+		record(k.SetStringValue("AutoConfigURL", s.AutoConfigURL))
 	} else {
-		k.DeleteValue("AutoConfigURL")
+		delValue("AutoConfigURL")
 	}
 	inetNotify()
-	return nil
+	return firstErr
 }
