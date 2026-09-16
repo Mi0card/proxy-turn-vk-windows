@@ -3,6 +3,12 @@
 # Cap 50 active lines; maintain.md moves superseded/expired ones to the Archive section.
 # Format: `D<n> <YYYY-MM-DD> [scope] decision — why. (Supersedes D<m>.)`
 
+- D17 2026-09-15 [proxy, user] connection-log format `→ host:port - app - [Nms, proxy|direct]`
+  (block → `[block]`, error → `: ошибка: …`); app = local-port→PID→process basename, UA fallback,
+  `—` if unknown; `→ ` prefix preserved (it routes lines to the «Подключения» tab, app.go:899). (S16, design 003.)
+- D16 2026-09-15 [proxy, user] WinINET system proxy now applies routing rules and follows the global
+  «Трафик по умолчанию» like SOCKS5/HTTP (was: unconditional strict tunnel); stock default `proxy`, so no
+  leak out of the box, but a user-set `direct`/`block` applies too. (S16, design 003.)
 - D15 2026-09-10 [frontend] UI field defaults live in HTML as the single source; JS captures them
   into `DEFAULTS` at load (main.js) instead of duplicating literals — prevents HTML↔JS drift (I19, S15).
 - D14 2026-09-09 [engine, user] fingerprint feature dropped (GUI + app.go + go_client): upstream

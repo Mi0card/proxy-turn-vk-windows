@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -323,11 +324,17 @@ func TestRelayBidirectional(t *testing.T) {
 
 // ── sysProxyHandler (I10/I21) ────────────────────────────────────────────────
 
+// noTunnelSysProxyServer — прокси без правил (политика по умолчанию proxy) и
+// без активного туннеля: любой вывод в туннель обязан падать.
+func noTunnelSysProxyServer() *ProxyServer {
+	return NewProxyServer(nil, nil)
+}
+
 // Без активного WireGuard-туннеля wgDialStrict всегда падает — оба
 // обработчика обязаны вернуть 502, а не висеть/паниковать.
 func TestSysProxyHandlerConnectNoTunnel(t *testing.T) {
-	h := newSysProxyHandler()
-	req := httptest.NewRequest(http.MethodConnect, "http://example.invalid/", nil)
+	h := newSysProxyHandler(noTunnelSysProxyServer())
+	req := httptest.NewRequest(http.MethodConnect, "example.invalid:443", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway {
@@ -336,7 +343,7 @@ func TestSysProxyHandlerConnectNoTunnel(t *testing.T) {
 }
 
 func TestSysProxyHandlerHTTPNoTunnel(t *testing.T) {
-	h := newSysProxyHandler()
+	h := newSysProxyHandler(noTunnelSysProxyServer())
 	req := httptest.NewRequest(http.MethodGet, "http://example.invalid/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -346,16 +353,171 @@ func TestSysProxyHandlerHTTPNoTunnel(t *testing.T) {
 }
 
 func TestNewSysProxyHandlerClose(t *testing.T) {
-	h := newSysProxyHandler()
-	if h.transport == nil {
-		t.Fatal("transport не создан")
+	h := newSysProxyHandler(NewProxyServer(nil, nil))
+	if h.transportDirect == nil || h.transportTunnel == nil {
+		t.Fatal("транспорты не созданы")
 	}
-	if h.transport.IdleConnTimeout <= 0 {
-		t.Fatalf("IdleConnTimeout = %v, ожидался положительный", h.transport.IdleConnTimeout)
+	if h.transportDirect.IdleConnTimeout <= 0 || h.transportTunnel.IdleConnTimeout <= 0 {
+		t.Fatalf("IdleConnTimeout = %v/%v, ожидался положительный",
+			h.transportDirect.IdleConnTimeout, h.transportTunnel.IdleConnTimeout)
 	}
 	h.Close() // не должно паниковать
 	// nil-получатель тоже безопасен (SystemProxyDisable зовёт handler.Close()
 	// даже когда прокси не был включён).
 	var nilH *sysProxyHandler
 	nilH.Close()
+}
+
+// Тест-хелпер: прокси с одним включённым правилом и сбором логов.
+func sysProxyWithRule(rule, policy string) (*sysProxyHandler, *[]string) {
+	var logs []string
+	p := NewProxyServer(func(msg, lv string) { logs = append(logs, msg) }, nil)
+	p.SetRulesetManager(NewRulesetManager(""))
+	p.SetRulesets([]RulesetConfig{{Rule: rule, Policy: policy, Enable: true}})
+	return newSysProxyHandler(p), &logs
+}
+
+// Правило block → 403 и строка лога ровно в целевом формате.
+func TestSysProxyHandlerBlockRule(t *testing.T) {
+	h, logs := sysProxyWithRule("domain:example.invalid", PolicyBlock)
+	req := httptest.NewRequest(http.MethodConnect, "example.invalid:443", nil)
+	// Порт 1 заведомо не принадлежит ни одному процессу → приложение "—".
+	req.RemoteAddr = "192.0.2.1:1"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("block CONNECT: статус %d, ожидалось 403", rec.Code)
+	}
+	want := "→ example.invalid:443 - — - [block]"
+	if len(*logs) == 0 || (*logs)[len(*logs)-1] != want {
+		t.Fatalf("лог = %v, ожидалось %q", *logs, want)
+	}
+}
+
+// Правило direct → sysproxy ходит напрямую (в обход туннеля) и логирует direct.
+func TestSysProxyHandlerDirectHTTP(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "ok")
+	}))
+	defer target.Close()
+
+	h, logs := sysProxyWithRule("ip:127.0.0.1", PolicyDirect)
+	req := httptest.NewRequest(http.MethodGet, target.URL+"/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("direct HTTP: статус %d, ожидалось 200", rec.Code)
+	}
+	if len(*logs) == 0 {
+		t.Fatal("нет строки лога соединения")
+	}
+	last := (*logs)[len(*logs)-1]
+	if !strings.HasPrefix(last, "→ ") || !strings.Contains(last, ", direct]") {
+		t.Fatalf("лог = %q, ожидался формат \"→ ... - ..., direct]\"", last)
+	}
+}
+
+// ── Формат строк лога соединений ─────────────────────────────────────────────
+
+func TestConnLine(t *testing.T) {
+	if got := connLine("8.8.8.8:2345", "chrome.exe", PolicyProxy, 10391); got != "→ 8.8.8.8:2345 - chrome.exe - [10391ms, proxy]" {
+		t.Fatalf("connLine = %q", got)
+	}
+	if got := connLine("a.com:443", unknownApp, PolicyDirect, 5); got != "→ a.com:443 - — - [5ms, direct]" {
+		t.Fatalf("connLine direct = %q", got)
+	}
+	if got := connLineBlock("a.com:443", "curl"); got != "→ a.com:443 - curl - [block]" {
+		t.Fatalf("connLineBlock = %q", got)
+	}
+	if got := connLineError("a.com:443", "curl", "i/o timeout"); got != "→ a.com:443 - curl: ошибка: i/o timeout" {
+		t.Fatalf("connLineError = %q", got)
+	}
+	// CR/LF в подставляемых значениях не должно разрывать строку лога.
+	if got := connLine("a.com:443\r\n→ evil:1", "ap\np.exe", PolicyProxy, 1); strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("connLine оставил перевод строки: %q", got)
+	}
+	if got := connLineError("a.com:443", "curl", "boom\n→ fake"); strings.ContainsAny(got, "\r\n") {
+		t.Fatalf("connLineError оставил перевод строки: %q", got)
+	}
+}
+
+func TestUAAppName(t *testing.T) {
+	cases := []struct{ ua, want string }{
+		{"", ""},
+		{"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0 Safari/537.36", "Chrome"},
+		{"Mozilla/5.0 (X11; Linux) Gecko/20100101 Firefox/137.0", "Firefox"},
+		{"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/146.0 Safari/537.36 Edg/146.0", "Edge"},
+		{"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/146.0 Safari/537.36 OPR/100.0", "Opera"},
+		{"Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/146.0 Safari/537.36 YaBrowser/24.1", "Yandex"},
+		{"Mozilla/5.0 (Macintosh) AppleWebKit/605.1 Safari/605.1", "Safari"},
+		{"curl/8.4.0", "curl"},
+		{"Mozilla/5.0 (unknown)", ""},
+	}
+	for _, c := range cases {
+		if got := uaAppName(c.ua); got != c.want {
+			t.Errorf("uaAppName(%q) = %q, ожидалось %q", c.ua, got, c.want)
+		}
+	}
+}
+
+func TestClientPortFromAddr(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"127.0.0.1:54321", 54321},
+		{"[::1]:8080", 8080},
+		{"127.0.0.1", 0},
+		{"", 0},
+		{"127.0.0.1:abc", 0},
+		{"127.0.0.1:0", 0},
+		{"127.0.0.1:99999", 0},
+	}
+	for _, c := range cases {
+		if got := clientPortFromAddr(c.in); got != c.want {
+			t.Errorf("clientPortFromAddr(%q) = %d, ожидалось %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestHTTPTarget(t *testing.T) {
+	cases := []struct{ url, want string }{
+		{"http://example.com/path", "example.com:80"},
+		{"https://example.com/path", "example.com:443"},
+		{"http://example.com:8080/path", "example.com:8080"},
+		{"http://[::1]/path", "[::1]:80"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, c.url, nil)
+		if got := httpTarget(req); got != c.want {
+			t.Errorf("httpTarget(%q) = %q, ожидалось %q", c.url, got, c.want)
+		}
+	}
+}
+
+func TestAppNameCache(t *testing.T) {
+	c := &appNameCache{ttl: time.Second, items: map[int]appNameEntry{}}
+	if _, ok := c.get(80); ok {
+		t.Fatal("пустой кеш не должен содержать запись")
+	}
+	c.put(80, "svc")
+	if name, ok := c.get(80); !ok || name != "svc" {
+		t.Fatalf("get = %q/%v, ожидалось svc/true", name, ok)
+	}
+	c.items[81] = appNameEntry{name: "old", at: time.Now().Add(-2 * time.Second)}
+	if _, ok := c.get(81); ok {
+		t.Fatal("истёкшая запись не должна возвращаться")
+	}
+}
+
+func TestConnAppNameFallback(t *testing.T) {
+	// Порт 1 заведомо не принадлежит процессу → откат на UA.
+	if got := connAppName(1, "curl/8.4.0"); got != "curl" {
+		t.Fatalf("connAppName = %q, ожидалось curl", got)
+	}
+	// Ни порта, ни UA → "—".
+	if got := connAppName(0, ""); got != unknownApp {
+		t.Fatalf("connAppName = %q, ожидалось %q", got, unknownApp)
+	}
 }

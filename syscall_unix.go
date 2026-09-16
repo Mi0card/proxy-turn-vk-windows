@@ -22,3 +22,7 @@ func inetNotify()                                       {}
 func sysProxyRead() (sysProxySnapshot, error)           { return sysProxySnapshot{}, errSysProxyUnsupported }
 func sysProxyApplyStatic(server, override string) error { return errSysProxyUnsupported }
 func sysProxyRestore(s sysProxySnapshot) error          { return errSysProxyUnsupported }
+
+// lookupProcessByPort — заглушка: определение приложения по порту доступно
+// только на Windows и macOS.
+func lookupProcessByPort(port int) string { return "" }

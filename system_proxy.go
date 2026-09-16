@@ -110,7 +110,7 @@ func (a *App) SystemProxyEnable() string {
 	proxyAddr := fmt.Sprintf("127.0.0.1:%d", port)
 
 	// Запускаем HTTP-прокси (без auth) на этом листенере.
-	handler := newSysProxyHandler()
+	handler := newSysProxyHandler(a.proxy)
 	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 30 * time.Second}
 	go srv.Serve(ln)
 	a.sysProxyMu.Lock()

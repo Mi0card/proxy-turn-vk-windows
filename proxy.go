@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -483,6 +484,163 @@ func (p *ProxyServer) log(msg, lv string) {
 	}
 }
 
+// ── Формат строк лога соединений ──────────────────────────────────────────────
+//
+// Формат (вкладка «Подключения»):
+//
+//	успех:  → host:port - app - [123ms, proxy]
+//	блок:   → host:port - app - [block]
+//	ошибка: → host:port - app: ошибка: err
+//
+// Префикс "→ " сохранён: App.socksLog по нему направляет строки во вкладку
+// «Подключения». unknownApp ("—") подставляется, если приложение определить
+// не удалось.
+
+const unknownApp = "—"
+
+// logField вычищает CR/LF из подставляемых значений (имя процесса, host из
+// SOCKS5-запроса, текст ошибки): иначе перевод строки подделал бы разметку лога.
+func logField(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
+func connLine(target, app, policy string, ms int) string {
+	return fmt.Sprintf("→ %s - %s - [%dms, %s]", logField(target), logField(app), ms, policy)
+}
+
+func connLineBlock(target, app string) string {
+	return fmt.Sprintf("→ %s - %s - [block]", logField(target), logField(app))
+}
+
+func connLineError(target, app, errText string) string {
+	return fmt.Sprintf("→ %s - %s: ошибка: %s", logField(target), logField(app), logField(errText))
+}
+
+// httpTarget возвращает host:port обычного (не CONNECT) HTTP-запроса,
+// подставляя порт по схеме, если он не указан явно.
+func httpTarget(r *http.Request) string {
+	host := r.URL.Host
+	if host == "" {
+		host = r.Host
+	}
+	if h, p, err := net.SplitHostPort(host); err == nil && h != "" && p != "" {
+		return net.JoinHostPort(h, p)
+	}
+	port := "80"
+	if r.URL.Scheme == "https" {
+		port = "443"
+	}
+	return net.JoinHostPort(strings.Trim(host, "[]"), port)
+}
+
+// ── Определение приложения-инициатора соединения ─────────────────────────────
+
+// appNameCache — TTL-кеш «локальный порт → имя процесса». Ключ — клиентский
+// порт соединения; 3 с ограничивают устаревание при переиспользовании порта,
+// 256 записей — потолок памяти.
+type appNameCache struct {
+	mu    sync.Mutex
+	ttl   time.Duration
+	items map[int]appNameEntry
+}
+
+type appNameEntry struct {
+	name string
+	at   time.Time
+}
+
+var procCache = &appNameCache{ttl: 3 * time.Second, items: map[int]appNameEntry{}}
+
+func (c *appNameCache) get(port int) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.items[port]
+	if !ok || time.Since(e.at) > c.ttl {
+		return "", false
+	}
+	return e.name, true
+}
+
+func (c *appNameCache) put(port int, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.items) >= 256 {
+		c.items = map[int]appNameEntry{}
+	}
+	c.items[port] = appNameEntry{name: name, at: time.Now()}
+}
+
+// clientPortFromAddr извлекает локальный порт клиента из "host:port".
+func clientPortFromAddr(addr string) int {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
+// uaAppName извлекает короткое имя клиента из User-Agent.
+// "Mozilla/5.0 ... Firefox/137.0" → "Firefox". "" — если не распознан.
+func uaAppName(ua string) string {
+	if ua == "" {
+		return ""
+	}
+	// Порядок важен: Chromium-браузеры содержат и Chrome, и Safari.
+	for _, p := range []struct{ token, name string }{
+		{"Edg/", "Edge"},
+		{"OPR/", "Opera"},
+		{"YaBrowser/", "Yandex"},
+		{"Firefox/", "Firefox"},
+		{"Chrome/", "Chrome"},
+		{"Safari/", "Safari"},
+		{"curl/", "curl"},
+		{"Wget/", "Wget"},
+		{"python-requests/", "python"},
+		{"Go-http-client/", "Go"},
+	} {
+		if strings.Contains(ua, p.token) {
+			return p.name
+		}
+	}
+	name := ua
+	if i := strings.IndexByte(name, '/'); i > 0 {
+		name = name[:i]
+	}
+	if name == "Mozilla" {
+		return ""
+	}
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	return name
+}
+
+// connAppName определяет приложение-инициатора соединения: сначала по
+// локальному порту (PID → имя процесса), затем по User-Agent (обычный HTTP),
+// иначе — "—".
+func connAppName(clientPort int, ua string) string {
+	if clientPort > 0 {
+		if name, ok := procCache.get(clientPort); ok {
+			return name
+		}
+		if name := lookupProcessByPort(clientPort); name != "" {
+			procCache.put(clientPort, name)
+			return name
+		}
+	}
+	if name := uaAppName(ua); name != "" {
+		return name
+	}
+	return unknownApp
+}
+
 // ── SOCKS5 ────────────────────────────────────────────────────────────────────
 
 func (p *ProxyServer) acceptSocks5(ln net.Listener, useAuth bool, user, pass string) {
@@ -587,11 +745,14 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	}
 	target := fmt.Sprintf("%s:%d", host, binary.BigEndian.Uint16(portBuf))
 
+	// Приложение-инициатор (по клиентскому порту).
+	app := connAppName(clientPortFromAddr(c.RemoteAddr().String()), "")
+
 	// Маршрутизация по правилам.
 	route := p.route(host)
 	if route.policy == PolicyBlock {
 		c.Write([]byte{5, 2, 0, 1, 0, 0, 0, 0, 0, 0}) // not allowed
-		p.log(fmt.Sprintf("→ %s  [заблокировано %s]", target, route.rule), "warn")
+		p.log(connLineBlock(target, app), "warn")
 		return
 	}
 
@@ -600,16 +761,12 @@ func (p *ProxyServer) handleSocks5(c net.Conn, useAuth bool, user, pass string) 
 	remote, err := p.dialForRoute(route.policy, "tcp", target)
 	if err != nil {
 		c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
-		p.log(fmt.Sprintf("→ %s: ошибка: %s", target, err), "warn")
+		p.log(connLineError(target, app, err.Error()), "warn")
 		return
 	}
 
 	c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
-	via := "туннель"
-	if route.policy == PolicyDirect {
-		via = "напрямую"
-	}
-	p.log(fmt.Sprintf("→ %s  [%dms, %s]", target, time.Since(start).Milliseconds(), via), "dim")
+	p.log(connLine(target, app, route.policy, int(time.Since(start).Milliseconds())), "dim")
 
 	// П.6 — context для graceful cancel обеих горутин
 	ctx, cancel := context.WithCancel(context.Background())
@@ -664,27 +821,27 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 		p.connOpen()
 		defer p.connClose()
 
+		// Приложение-инициатор (по клиентскому порту).
+		app := connAppName(clientPortFromAddr(r.RemoteAddr), "")
+
 		// Маршрутизация по правилам.
 		route := p.route(r.Host)
 		if route.policy == PolicyBlock {
 			http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
-			p.log(fmt.Sprintf("→ %s [CONNECT]  [заблокировано %s]", r.Host, route.rule), "warn")
+			p.log(connLineBlock(r.Host, app), "warn")
 			return
 		}
 
+		start := time.Now()
 		remote, err := p.dialForRoute(route.policy, "tcp", r.Host)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
-			p.log(fmt.Sprintf("→ %s: ошибка: %s", r.Host, err), "warn")
+			p.log(connLineError(r.Host, app, err.Error()), "warn")
 			return
 		}
 		defer remote.Close()
 		w.WriteHeader(http.StatusOK)
-		via := "туннель"
-		if route.policy == PolicyDirect {
-			via = "напрямую"
-		}
-		p.log(fmt.Sprintf("→ %s [CONNECT, %s]", r.Host, via), "dim")
+		p.log(connLine(r.Host, app, route.policy, int(time.Since(start).Milliseconds())), "dim")
 
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -702,11 +859,14 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	p.connOpen()
 	defer p.connClose()
 
+	// Приложение-инициатор (по клиентскому порту; для HTTP — с откатом на UA).
+	app := connAppName(clientPortFromAddr(r.RemoteAddr), r.Header.Get("User-Agent"))
+
 	// Маршрутизация по правилам.
 	route := p.route(r.URL.Host)
 	if route.policy == PolicyBlock {
 		http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
-		p.log(fmt.Sprintf("→ %s %s  [заблокировано %s]", r.Method, r.URL.Host, route.rule), "warn")
+		p.log(connLineBlock(httpTarget(r), app), "warn")
 		return
 	}
 
@@ -714,26 +874,26 @@ func (p *ProxyServer) handleHTTP(w http.ResponseWriter, r *http.Request, useAuth
 	// Удаляем hop-by-hop заголовки (RFC 2616 §13.5.1) — они не должны
 	// пересылаться через прокси.
 	stripHopByHopHeaders(r.Header)
-	via := "туннель"
-	if route.policy == PolicyDirect {
-		via = "напрямую"
-	}
 	var transport *http.Transport
 	if route.policy == PolicyDirect {
 		transport = p.transportDirect
 	} else {
 		transport = p.transportTunnel
 	}
+	start := time.Now()
 	resp, err := transport.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
+		p.log(connLineError(httpTarget(r), app, err.Error()), "warn")
 		return
 	}
 	defer resp.Body.Close()
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
+	// Логируем по получении ответа (как CONNECT/SOCKS5 — время до ответа), а не
+	// после вычитывания тела: стримы иначе искажают метрику.
+	p.log(connLine(httpTarget(r), app, route.policy, int(time.Since(start).Milliseconds())), "dim")
 	io.Copy(w, resp.Body)
-	p.log(fmt.Sprintf("→ %s %s [%s]", r.Method, r.URL.Host, via), "dim")
 }
 
 // idleConn обновляет deadline при каждом успешном чтении/записи — это даёт
@@ -802,24 +962,40 @@ func relayBidirectional(a, b net.Conn, idle time.Duration) {
 // ── System Proxy handler (без auth, отдельный листенер) ──────────────────────
 
 // sysProxyHandler — минимальный HTTP-прокси без аутентификации.
-// Используется для WinINET system proxy на отдельном порту.
+// Используется для WinINET system proxy на отдельном порту. Применяет те же
+// правила маршрутизации, что и основной прокси, и логирует соединения в общий
+// журнал «Подключения».
 type sysProxyHandler struct {
-	transport *http.Transport
+	p               *ProxyServer
+	transportDirect *http.Transport
+	transportTunnel *http.Transport
 }
 
-func newSysProxyHandler() *sysProxyHandler {
-	t := newTunnelTransport()
-	// Ограничиваем время жизни idle-соединений: системный прокси включают и
-	// выключают, пул не должен копить «вечные» коннекты между циклами.
-	t.IdleConnTimeout = 90 * time.Second
-	return &sysProxyHandler{transport: t}
+func newSysProxyHandler(p *ProxyServer) *sysProxyHandler {
+	direct := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return net.DialTimeout(network, addr, 30*time.Second)
+		},
+		// Ограничиваем время жизни idle-соединений: системный прокси включают и
+		// выключают, пул не должен копить «вечные» коннекты между циклами.
+		IdleConnTimeout: 90 * time.Second,
+	}
+	tunnel := newTunnelTransport()
+	tunnel.IdleConnTimeout = 90 * time.Second
+	return &sysProxyHandler{p: p, transportDirect: direct, transportTunnel: tunnel}
 }
 
-// Close освобождает idle-соединения транспорта. srv.Close() закрывает
-// in-flight запросы, но не пул — вызывается при выключении системного прокси.
+// Close освобождает idle-соединения транспортов. srv.Close() закрывает
+// in-flight запросы, но не пулы — вызывается при выключении системного прокси.
 func (h *sysProxyHandler) Close() {
-	if h != nil && h.transport != nil {
-		h.transport.CloseIdleConnections()
+	if h == nil {
+		return
+	}
+	if h.transportDirect != nil {
+		h.transportDirect.CloseIdleConnections()
+	}
+	if h.transportTunnel != nil {
+		h.transportTunnel.CloseIdleConnections()
 	}
 }
 
@@ -832,13 +1008,26 @@ func (h *sysProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *sysProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request) {
-	remote, err := wgDialStrict("tcp", r.Host)
+	p := h.p
+	app := connAppName(clientPortFromAddr(r.RemoteAddr), "")
+
+	route := p.route(r.Host)
+	if route.policy == PolicyBlock {
+		http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
+		p.log(connLineBlock(r.Host, app), "warn")
+		return
+	}
+
+	start := time.Now()
+	remote, err := p.dialForRoute(route.policy, "tcp", r.Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
+		p.log(connLineError(r.Host, app, err.Error()), "warn")
 		return
 	}
 	defer remote.Close()
 	w.WriteHeader(http.StatusOK)
+	p.log(connLine(r.Host, app, route.policy, int(time.Since(start).Milliseconds())), "dim")
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -851,15 +1040,34 @@ func (h *sysProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *sysProxyHandler) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	p := h.p
+	app := connAppName(clientPortFromAddr(r.RemoteAddr), r.Header.Get("User-Agent"))
+
+	route := p.route(r.URL.Host)
+	if route.policy == PolicyBlock {
+		http.Error(w, "Connection blocked by ruleset", http.StatusForbidden)
+		p.log(connLineBlock(httpTarget(r), app), "warn")
+		return
+	}
+
 	r.RequestURI = ""
 	stripHopByHopHeaders(r.Header)
-	resp, err := h.transport.RoundTrip(r)
+	transport := h.transportTunnel
+	if route.policy == PolicyDirect {
+		transport = h.transportDirect
+	}
+	start := time.Now()
+	resp, err := transport.RoundTrip(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
+		p.log(connLineError(httpTarget(r), app, err.Error()), "warn")
 		return
 	}
 	defer resp.Body.Close()
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
+	// Логируем по получении ответа (как CONNECT/SOCKS5 — время до ответа), а не
+	// после вычитывания тела: стримы иначе искажают метрику.
+	p.log(connLine(httpTarget(r), app, route.policy, int(time.Since(start).Milliseconds())), "dim")
 	io.Copy(w, resp.Body)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -290,3 +291,61 @@ func sysProxyRestore(s sysProxySnapshot) error {
 }
 
 func inetNotify() {}
+
+// ── Определение процесса-владельца соединения по локальному порту ─────────────
+//
+// Используется `lsof -F` (field mode): каждая строка начинается с идентификатора
+// поля (p=PID, c=команда, n=адрес), что устойчиво к пробелам в имени процесса
+// ("Google Chrome") и не требует разбора колонок. Best-effort: при отсутствии
+// lsof/прав возвращается "".
+
+// lookupProcessByPort возвращает имя процесса, владеющего TCP-соединением с
+// заданным локальным (клиентским) портом. "" — если определить не удалось.
+func lookupProcessByPort(port int) string {
+	if port <= 0 || port > 65535 {
+		return ""
+	}
+	out, err := exec.Command("lsof", "-nP", "-iTCP", "-Fpcn", "-sTCP:ESTABLISHED").Output()
+	if err != nil {
+		return ""
+	}
+	var name string
+	inRecord := false
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" {
+			continue
+		}
+		switch line[0] {
+		case 'p':
+			name = ""
+			inRecord = true
+		case 'c':
+			if inRecord {
+				name = line[1:]
+			}
+		case 'n':
+			if inRecord && name != "" && localPortOf(line[1:]) == port {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// localPortOf извлекает локальный порт из поля адреса lsof:
+// "127.0.0.1:54321->1.2.3.4:443" → 54321.
+func localPortOf(addr string) int {
+	local := addr
+	if i := strings.Index(local, "->"); i >= 0 {
+		local = local[:i]
+	}
+	i := strings.LastIndexByte(local, ':')
+	if i < 0 {
+		return 0
+	}
+	p, err := strconv.Atoi(local[i+1:])
+	if err != nil {
+		return 0
+	}
+	return p
+}
