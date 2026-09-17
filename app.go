@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.1.1"
+const AppVersion = "0.3.1.2"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1638,9 +1638,10 @@ func (a *App) restartTunnel() {
 // иначе fallback на прямое соединение — иначе пинг не отображался бы до поднятия
 // userspace-туннеля. Провалы не считаются и ни к чему не приводят — решение о
 // рестарте принимает только детектор по таймаутам всех воркеров
-// (requestDeadRestartLocked). Таймаут 10с: холодный WG-хендшейк и медленный
-// TURN-релей не укладываются в прежние 4с.
-const pingProbeTimeout = 10 * time.Second
+// (requestDeadRestartLocked). Таймаут 30с: dial через медленный TURN-релей
+// занимает 10-15с (видно в логе подключений), в 4с/10с проба не укладывалась
+// и пинг не отображался. 30с — значение старого wgDial.
+const pingProbeTimeout = 30 * time.Second
 
 func (a *App) pingLoop(stop chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)

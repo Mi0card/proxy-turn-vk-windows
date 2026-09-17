@@ -4,16 +4,14 @@
      Contradicts git log / the journal (a session died before END)? Trust git: rebuild this
      file from the last journal entry + `git log -5`, note the crash in the journal. -->
 
-Session: 17
+Session: 18
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: patch (UNCOMMITTED) — 3 user-reported fixes, v0.3.1.1: (1) import config now refreshes the
-        profile list immediately (frontend refreshProfiles + backend legacy→profile migration on
-        import); (2) import/export completion toasts + cancel distinguished from error
-        (SaveConfigResult); (3) ping visible again — pingLoop uses wgDialFallbackTimeout (netstack
-        else direct) + 10s probe, and updateTunnelUI delegates the badge to updateStatusBadge
-        (single writer). Green.
-Next: commit v0.3.1.1 (needs user go-ahead). macOS lsof lookup + I13 (darwin captcha timeout) need a
-      real-Mac check. No open issues (next id I22).
+Active: patch (UNCOMMITTED) — v0.3.1.2: pingProbeTimeout 10s → 30s (real TURN dials are 10-15s per
+        the connection log, so the 10s probe never succeeded and no `tunnel:ping` was emitted; 30s =
+        old wgDial value). No other code changed. Green.
+Next: commit v0.3.1.2 (needs user go-ahead). Confirm ping shows in the header on the user's box
+      (~10-14s). macOS lsof lookup + I13 (darwin captcha timeout) need a real-Mac check. No open
+      issues (next id I22).
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -33,12 +31,14 @@ Blocked: none
   SaveConfig keeps it when empty (app.go). Do not repurpose that key.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
+- S17: 3 user-reported fixes — config import refreshes the profile list, import/export toasts + cancel
+  vs error (SaveConfigResult), ping probe wgDialFallbackTimeout + single status-badge writer; v0.3.1.1.
+  COMMITTED 850a51d.
 - S16: feature 003 — connection-log format + app-by-port→PID (win/mac/stub) + system-proxy routing &
   logging; v0.3.1.0. COMMITTED 291b2e0.
 - S15: fixed I8–I21 — P2 system-proxy restore/rollback + transport leak, frontend init guard + status
   badge, darwin captcha timeout; P3 dead-code removal, proxy relay dedup, log-renderer dedup, ts/lv
   escaping, DEFAULTS/version drift. v0.3.0.3.
-- S14: audit — 14 findings filed (I8–I21); PROJECT.md stale lines corrected.
 
 ## Recently audited (cleared — stop re-litigating)
 - S14 audit cleared: proxy transport pool (I6), system-proxy backup tests (I5), renderRuleSuggest XSS
