@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.1.0"
+const AppVersion = "0.3.1.1"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1634,11 +1634,13 @@ func (a *App) restartTunnel() {
 }
 
 // pingLoop — liveness-проба туннеля (только измерение, без рестарта): раз в
-// 5 секунд честный dial через WireGuard (строго через туннель) к
-// cp.cloudflare.com:80. Успех → отдаём задержку в UI. Провалы не считаются и
-// ни к чему не приводят — решение о рестарте принимает только детектор по
-// таймаутам всех воркеров (requestDeadRestartLocked).
-const pingProbeTimeout = 4 * time.Second
+// 5 секунд dial к cp.cloudflare.com:80. Через WireGuard, когда netstack активен,
+// иначе fallback на прямое соединение — иначе пинг не отображался бы до поднятия
+// userspace-туннеля. Провалы не считаются и ни к чему не приводят — решение о
+// рестарте принимает только детектор по таймаутам всех воркеров
+// (requestDeadRestartLocked). Таймаут 10с: холодный WG-хендшейк и медленный
+// TURN-релей не укладываются в прежние 4с.
+const pingProbeTimeout = 10 * time.Second
 
 func (a *App) pingLoop(stop chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
@@ -1653,13 +1655,13 @@ func (a *App) pingLoop(stop chan struct{}) {
 			paused := a.tunnelPaused
 			a.tunnelMu.Unlock()
 
-			// Туннель остановлен/на паузе или WG ещё не поднят — не пингуем.
-			if !running || paused || !WGTunnelActive() {
+			// Туннель остановлен/на паузе — не пингуем.
+			if !running || paused {
 				continue
 			}
 
 			start := time.Now()
-			c, err := wgDialStrictTimeout("tcp", "cp.cloudflare.com:80", pingProbeTimeout)
+			c, err := wgDialFallbackTimeout("tcp", "cp.cloudflare.com:80", pingProbeTimeout)
 			if err != nil {
 				continue
 			}
@@ -2325,9 +2327,17 @@ func (a *App) ExportConfig() string {
 	return string(data)
 }
 
+// SaveConfigResult — результат экспорта конфигурации для фронтенда. Canceled
+// отличает отмену диалога от ошибки записи (раньше обе давали false).
+type SaveConfigResult struct {
+	OK       bool   `json:"ok"`
+	Canceled bool   `json:"canceled"`
+	Error    string `json:"error"`
+}
+
 // SaveConfigDialog сохраняет JSON-конфигурацию через системный диалог
 // (права 0600 — файл содержит секреты).
-func (a *App) SaveConfigDialog(content string) bool {
+func (a *App) SaveConfigDialog(content string) SaveConfigResult {
 	path, _ := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Экспорт конфигурации",
 		DefaultFilename: "windtt_config.json",
@@ -2336,9 +2346,13 @@ func (a *App) SaveConfigDialog(content string) bool {
 		},
 	})
 	if path == "" {
-		return false
+		return SaveConfigResult{Canceled: true}
 	}
-	return os.WriteFile(path, []byte(content), 0600) == nil
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		a.log("⚠ Не удалось сохранить конфиг: "+err.Error(), "warn")
+		return SaveConfigResult{Error: err.Error()}
+	}
+	return SaveConfigResult{OK: true}
 }
 
 // ImportResult — результат импорта конфигурации для фронтенда.
@@ -2346,6 +2360,17 @@ type ImportResult struct {
 	OK     bool   `json:"ok"`
 	Error  string `json:"error"`
 	Config Config `json:"config"`
+}
+
+// applyImportedConfigLocked подставляет импортированный конфиг, сохраняя
+// текущий DeviceID (он присваивается сервером и вряд ли подходит из чужого
+// файла), и мигрирует легаси-поля в профиль. Вызывается с взятым cfgMu.
+func (a *App) applyImportedConfigLocked(imported Config) {
+	imported.DeviceID = a.cfg.DeviceID
+	a.cfg = imported
+	// Легаси-конфиг (поля vk/srv/sec без profiles) мигрируем в профиль сразу,
+	// иначе список профилей появился бы только после перезапуска.
+	a.migrateLegacyProfileLocked()
 }
 
 // ImportConfig открывает диалог выбора JSON-файла, парсит его и заменяет
@@ -2372,8 +2397,7 @@ func (a *App) ImportConfig() ImportResult {
 		return ImportResult{OK: false, Error: "Некорректный JSON конфигурации: " + err.Error()}
 	}
 	a.cfgMu.Lock()
-	imported.DeviceID = a.cfg.DeviceID
-	a.cfg = imported
+	a.applyImportedConfigLocked(imported)
 	a.cfgMu.Unlock()
 	if err := a.persistConfig(); err != nil {
 		return ImportResult{OK: false, Error: err.Error()}

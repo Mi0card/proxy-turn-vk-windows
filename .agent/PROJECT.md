@@ -28,7 +28,7 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
 - WinINET — Windows internet settings store (registry HKCU) that browsers/Office honor.
 - ruleset — routing rule set: `domain:`, `domain-suffix:`, `keyword:`, `regex:`, `cidr:`, `ip:` and
   `ruleset:geosite-<g>`/`geoip-<g>` from v2ray protobuf dat files; policies block/direct/proxy, first match wins.
-- AppVersion — version const in app.go:30 (`0.3.0.3`); bumping it triggers the CI build.
+- AppVersion — version const in app.go:30 (`0.3.1.1`); bumping it triggers the CI build.
 - CaptchaMode / ObfsMode — per-profile tunnel options surfaced in the UI and passed to the engine.
 
 ## Landmines (cross-cutting gotchas, ≤15; area-specific ones belong in .agent/areas/)

@@ -417,11 +417,6 @@ function setLoadedProfile(p) {
 }
 
 async function initProfiles() {
-  const profiles = await window.go.main.App.GetProfiles();
-  const active = await window.go.main.App.GetActiveProfile();
-  state.connProfiles = profiles || [];
-  state.activeProfile = active || '';
-
   const sel = document.getElementById('conn-profile');
   if (sel) {
     sel.addEventListener('change', onProfileChange);
@@ -436,6 +431,17 @@ async function initProfiles() {
     else if (e.key === 'Escape') { e.preventDefault(); closeProfileModal(); }
   });
 
+  await refreshProfiles();
+}
+
+// Перечитывает профили из бэкенда, перерисовывает список и загружает активный
+// профиль в форму. Отдельно от initProfiles, чтобы вызывать после импорта
+// конфига без повторной регистрации обработчиков (иначе listeners дублируются).
+async function refreshProfiles() {
+  const profiles = await window.go.main.App.GetProfiles();
+  const active = await window.go.main.App.GetActiveProfile();
+  state.connProfiles = profiles || [];
+  state.activeProfile = active || '';
   renderProfiles();
 
   // Автозагрузка активного профиля (чтобы «Подключить» сразу использовал его).
@@ -443,6 +449,8 @@ async function initProfiles() {
   if (ap) {
     applyProfile(ap);
     setLoadedProfile(ap);
+  } else {
+    setLoadedProfile(null);
   }
 }
 
@@ -806,24 +814,15 @@ function onCaptchaDone() {
 
 function updateTunnelUI() {
   const { tunnelRunning: r, tunnelPaused: p } = state;
-  const statusEl   = document.getElementById('status-badge');
   const btnConnect = document.getElementById('btn-connect');
   const btnPause   = document.getElementById('btn-pause');
   const btnStop    = document.getElementById('btn-stop');
 
-  const dot = '<span class="dot"></span> ';
-
   if (r && p) {
-    statusEl.innerHTML = dot + 'Туннель пауза';
-    statusEl.className = 'badge paused';
     setBtnLabel(btnPause, 'Продолжить');
   } else if (r) {
-    statusEl.innerHTML = dot + 'Туннель';
-    statusEl.className = 'badge connected';
     setBtnLabel(btnPause, 'Пауза');
   } else {
-    statusEl.innerHTML = dot + 'Туннель выкл';
-    statusEl.className = 'badge disconnected';
     state.activeWorkers = 0;
     updateWorkersUI();
     state.lastPingMs = null;
@@ -832,6 +831,10 @@ function updateTunnelUI() {
     const sb2 = document.getElementById('speed-badge');
     if (sb2) { sb2.textContent = ''; sb2.className = 'badge hidden'; }
   }
+
+  // Единственный писатель статус-баджа: updateStatusBadge знает про пинг и
+  // паузу, поэтому статус-событие больше не стирает показанную задержку.
+  updateStatusBadge();
 
   btnConnect.disabled = r;
   btnPause.disabled   = !r;
@@ -1604,9 +1607,20 @@ async function undeploy() {
 
 async function exportConfig() {
   const content = await window.go.main.App.ExportConfig();
-  if (!content) { log('Не удалось сериализовать конфигурацию.', 'error'); return; }
-  const ok = await window.go.main.App.SaveConfigDialog(content);
-  if (ok) log('Конфигурация экспортирована.', 'success');
+  if (!content) {
+    log('Не удалось сериализовать конфигурацию.', 'error');
+    showToast('Не удалось экспортировать конфигурацию');
+    return;
+  }
+  const res = await window.go.main.App.SaveConfigDialog(content);
+  if (res.canceled) { log('Экспорт отменён.', 'warn'); return; }
+  if (!res.ok) {
+    log('Ошибка экспорта: ' + (res.error || 'неизвестная'), 'error');
+    showToast('Не удалось сохранить конфигурацию');
+    return;
+  }
+  log('Конфигурация экспортирована.', 'success');
+  showToast('Конфигурация экспортирована', 'success');
 }
 
 async function importConfig() {
@@ -1617,17 +1631,23 @@ async function importConfig() {
   if (!confirmed) { log('Импорт отменён.', 'warn'); return; }
   const res = await window.go.main.App.ImportConfig();
   if (!res.ok) {
-    log('Ошибка импорта: ' + (res.error || 'неизвестная'), 'error');
+    // Пустой error = пользователь закрыл диалог выбора файла (не ошибка).
+    if (!res.error) { log('Импорт отменён.', 'warn'); return; }
+    log('Ошибка импорта: ' + res.error, 'error');
     showToast('Не удалось импортировать конфигурацию');
     return;
   }
   log('Конфигурация импортирована.', 'success');
   await applyImportedConfig(res.config);
+  showToast('Конфигурация импортирована', 'success');
 }
 
 async function applyImportedConfig(cfg) {
   if (cfg) loadConfig(cfg);
   if (cfg && cfg.theme) applyTheme(cfg.theme);
+  // Импорт заменяет профили в бэкенде — перечитываем их, иначе список профилей
+  // останется пустым до перезапуска.
+  await refreshProfiles();
   loadRoutingTab();
 }
 

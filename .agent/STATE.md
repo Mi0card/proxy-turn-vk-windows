@@ -4,13 +4,16 @@
      Contradicts git log / the journal (a session died before END)? Trust git: rebuild this
      file from the last journal entry + `git log -5`, note the crash in the journal. -->
 
-Session: 16
+Session: 17
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: feature 003 SHIPPED (UNCOMMITTED): connection log `→ host:port - app - [Nms, proxy|direct]`
-        (block `[block]`, error `: ошибка: …`), app = local-port→PID→process name (win/mac/stub, UA
-        fallback, 3s cache), system proxy now applies routing rules + logs; v0.3.1.0. Green.
-Next: commit v0.3.1.0 (needs user go-ahead — not yet committed). macOS lsof lookup + I13 (darwin captcha
-      timeout) need a real-Mac check. No open issues (next id I22).
+Active: patch (UNCOMMITTED) — 3 user-reported fixes, v0.3.1.1: (1) import config now refreshes the
+        profile list immediately (frontend refreshProfiles + backend legacy→profile migration on
+        import); (2) import/export completion toasts + cancel distinguished from error
+        (SaveConfigResult); (3) ping visible again — pingLoop uses wgDialFallbackTimeout (netstack
+        else direct) + 10s probe, and updateTunnelUI delegates the badge to updateStatusBadge
+        (single writer). Green.
+Next: commit v0.3.1.1 (needs user go-ahead). macOS lsof lookup + I13 (darwin captcha timeout) need a
+      real-Mac check. No open issues (next id I22).
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -31,10 +34,10 @@ Blocked: none
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
 - S16: feature 003 — connection-log format + app-by-port→PID (win/mac/stub) + system-proxy routing &
-  logging; review findings folded in; v0.3.1.0. +tests (proxy, syscall_windows live self-test, darwin).
+  logging; v0.3.1.0. COMMITTED 291b2e0.
 - S15: fixed I8–I21 — P2 system-proxy restore/rollback + transport leak, frontend init guard + status
   badge, darwin captcha timeout; P3 dead-code removal, proxy relay dedup, log-renderer dedup, ts/lv
-  escaping, DEFAULTS/version drift. +6 proxy tests. Upstream worker default re-verified = 9. v0.3.0.3.
+  escaping, DEFAULTS/version drift. v0.3.0.3.
 - S14: audit — 14 findings filed (I8–I21); PROJECT.md stale lines corrected.
 
 ## Recently audited (cleared — stop re-litigating)

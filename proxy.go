@@ -56,6 +56,25 @@ func wgDialStrictTimeout(network, addr string, timeout time.Duration) (net.Conn,
 	return nil, fmt.Errorf("туннель не активен")
 }
 
+// wgDialFallbackTimeout — проба с fallback: через туннель, когда netstack
+// активен, иначе прямое соединение. Используется только индикатором задержки
+// в шапке (pingLoop): без fallback пинг не показывается, пока userspace
+// WireGuard ещё не поднят. Маршрутизацией трафика НЕ пользуется — там строгий
+// wgDialStrictTimeout, чтобы не было утечки в обход туннеля.
+func wgDialFallbackTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
+	wgTun.mu.Lock()
+	tnet := wgTun.tnet
+	active := wgTun.active
+	wgTun.mu.Unlock()
+
+	if active && tnet != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		return tnet.DialContext(ctx, network, addr)
+	}
+	return net.DialTimeout(network, addr, timeout)
+}
+
 func StartWGTunnel(conf string, dnsOverride []netip.Addr) error {
 	wgTun.mu.Lock()
 	defer wgTun.mu.Unlock()

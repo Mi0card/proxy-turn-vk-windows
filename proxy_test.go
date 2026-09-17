@@ -521,3 +521,32 @@ func TestConnAppNameFallback(t *testing.T) {
 		t.Fatalf("connAppName = %q, ожидалось %q", got, unknownApp)
 	}
 }
+
+// ── wgDialFallbackTimeout (индикатор пинга) ──────────────────────────────────
+
+// Без активного туннеля fallback-dial обязан идти напрямую (не падать с
+// «туннель не активен») — иначе пинг в шапке не отображался бы до поднятия WG.
+func TestWgDialFallbackNoTunnel(t *testing.T) {
+	StopWGTunnel() // гарантируем неактивный глобальный туннель
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+
+	conn, err := wgDialFallbackTimeout("tcp", ln.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("fallback dial без туннеля: %v", err)
+	}
+	conn.Close()
+}
