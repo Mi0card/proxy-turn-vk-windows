@@ -5,6 +5,9 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -40,22 +43,39 @@ jobs:
       - name: Re-apply local go_client layer
         run: bash .agent/local/go-client-local/apply.sh
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      # Upstream игнорирует go.sum (его .gitignore), а server/ вообще без
+      # go.mod — серверная часть собирается как корневой модуль upstream.
+      # Восстанавливаем модульные файлы сервера из корня upstream и
+      # пересобираем go.sum обоих модулей: без этого go build падает на
+      # "missing go.sum entry".
+      - name: Restore server_src module files
+        run: |
+          cp upstream/go.mod server_src/go.mod
+          cp upstream/go.sum server_src/go.sum
+
+      - name: Regenerate go.sum
+        run: |
+          (cd go_client && go mod tidy)
+          (cd server_src && go mod tidy)
+
+      # git add -A нужен, чтобы детект видел и НОВЫЕ файлы из upstream:
+      # git diff без индекса их не показывает, и сборка бы не запустилась.
       - name: Check for changes
         id: diff
         run: |
-          git diff --quiet go_client/ server_src/ \
+          git add -A go_client/ server_src/
+          git diff --cached --quiet go_client/ server_src/ \
             && echo "changed=false" >> $GITHUB_OUTPUT \
             || echo "changed=true"  >> $GITHUB_OUTPUT
 
       # Хард-проверка сборки перед открытием PR: слой обязан компилироваться
       # и под Windows (go_client), и под Linux (server_src). Если сборка
       # падает — workflow умирает, PR не создаётся, сломанный sync не уйдёт.
-      - name: Setup Go
-        if: steps.diff.outputs.changed == 'true'
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-
       - name: Build go_client (windows)
         if: steps.diff.outputs.changed == 'true'
         run: |

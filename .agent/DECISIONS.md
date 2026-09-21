@@ -3,6 +3,10 @@
 # Cap 50 active lines; maintain.md moves superseded/expired ones to the Archive section.
 # Format: `D<n> <YYYY-MM-DD> [scope] decision — why. (Supersedes D<m>.)`
 
+- D19 2026-09-21 [sync, user] sync.yml seeds server_src/go.mod+go.sum from upstream ROOT (server/
+  ships no go.mod — it IS the root module) then `go mod tidy`s both engine modules before the
+  diff/build gate; gate uses `git add -A` + `git diff --cached` to catch new upstream files.
+  Needed because upstream's .gitignore drops go.sum. (Extends D12/D13.)
 - D18 2026-09-17 [frontend, user] header ping is a display-only probe: `wgDialFallbackTimeout`
   (netstack when active, else direct) with a 30s timeout, and `updateStatusBadge` is the sole
   status-badge writer — the strict tunnel-only 4s probe (44a36aa) hid the ping until the netstack
