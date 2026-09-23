@@ -81,7 +81,7 @@ jobs:
         run: |
           cd go_client
           GOOS=windows go build ./...
-          rm -f wg-turn-client
+          rm -f wg-turn-client wg-turn-client.exe
           cd ..
 
       - name: Build server_src (linux)
@@ -89,7 +89,7 @@ jobs:
         run: |
           cd server_src
           GOOS=linux go build ./...
-          rm -f wg-turn-client
+          rm -f wg-turn-client wg-turn-client.exe
           cd ..
 
       - name: Get upstream version
