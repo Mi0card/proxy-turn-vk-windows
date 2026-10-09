@@ -48,6 +48,14 @@ func main() {
 	app.serverBinary = serverBinaryData
 	app.deployScript = deployScriptData
 
+	// GPU-ускорение WebView2 применяется при следующем запуске (WebView2
+	// фиксирует флаг при создании окна). Приоритет: конфиг (disable_gpu) →
+	// env WDTT_DISABLE_GPU → дефолт (ускорение включено).
+	gpuDisabled, gpuSet := gpuDisabledFromConfig()
+	if !gpuSet {
+		gpuDisabled = os.Getenv("WDTT_DISABLE_GPU") == "1"
+	}
+
 	wailsErr := wails.Run(&options.App{
 		Title:     "WinDTT  v" + AppVersion,
 		Width:     1050,
@@ -68,7 +76,7 @@ func main() {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			DisableWindowIcon:    false,
-			WebviewGpuIsDisabled: true,
+			WebviewGpuIsDisabled: gpuDisabled,
 			Theme:                windows.SystemDefault,
 		},
 	})

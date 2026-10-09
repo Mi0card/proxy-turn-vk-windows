@@ -3,6 +3,16 @@
 # Cap 50 active lines; maintain.md moves superseded/expired ones to the Archive section.
 # Format: `D<n> <YYYY-MM-DD> [scope] decision — why. (Supersedes D<m>.)`
 
+- D21 2026-10-09 [perf, user] GPU-ускорение WebView2 переключается из настроек
+  (`Config.DisableGpu *bool` `disable_gpu`; указатель отличает «не задано» от явного false).
+  Приоритет: конфиг → env `WDTT_DISABLE_GPU` → дефолт (включено). Читается в `main.go` до
+  `wails.Run`, т.к. WebView2 фиксирует флаг при создании окна → применяется после перезапуска
+  (live-переключения нет). Карточка скрыта вне Windows (`GpuSupported`). (S21.)
+- D20 2026-10-09 [perf, user] WebView2 GPU acceleration re-enabled by default (main.go
+  `WebviewGpuIsDisabled=false`; `WDTT_DISABLE_GPU=1` reverts) and proxy UI events coalesced —
+  `socks:log` batched (200ms / 500 cap), `socks:stats` latest-only via `proxyEventFlusher`,
+  frontend DOM cap 2000 / history 5000 — because overheating with the system proxy ON (CPU in
+  msedgewebview2.exe) is software rendering + per-connection event/DOM churn, not the netstack. (S21.)
 - D19 2026-09-21 [sync, user] sync.yml seeds server_src/go.mod+go.sum from upstream ROOT (server/
   ships no go.mod — it IS the root module) then `go mod tidy`s both engine modules before the
   diff/build gate; gate uses `git add -A` + `git diff --cached` to catch new upstream files.

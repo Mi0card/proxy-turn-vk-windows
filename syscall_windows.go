@@ -20,6 +20,10 @@ func sysProcAttr() *syscall.SysProcAttr {
 // sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
 func sysProxySupported() bool { return true }
 
+// gpuSupported сообщает фронтенду, доступна ли настройка GPU-ускорения WebView2
+// (только Windows: WebviewGpuIsDisabled — опция windows.Options).
+func gpuSupported() bool { return true }
+
 // ── WinINET system proxy ─────────────────────────────────────────────────────
 
 const inetSettingsPath = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`

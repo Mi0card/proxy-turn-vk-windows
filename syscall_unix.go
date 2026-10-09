@@ -18,6 +18,9 @@ var errSysProxyUnsupported = errors.New("system proxy поддерживаетс
 // sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
 func sysProxySupported() bool { return false }
 
+// gpuSupported — заглушка: настройка GPU-ускорения WebView2 только для Windows.
+func gpuSupported() bool { return false }
+
 func inetNotify()                                       {}
 func sysProxyRead() (sysProxySnapshot, error)           { return sysProxySnapshot{}, errSysProxyUnsupported }
 func sysProxyApplyStatic(server, override string) error { return errSysProxyUnsupported }

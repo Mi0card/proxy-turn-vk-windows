@@ -20,6 +20,17 @@ const state = {
   loadedProfile:  null, // профиль, поля которого сейчас в форме (снимок для dirty-проверки)
 };
 
+// Потолки логов: DOM-узлы дороги в отрисовке (особенно без GPU), а массивы
+// растут бесконечно при потоке фоновых соединений системного прокси.
+const LOG_DOM_MAX = 2000;     // максимум строк в одном лог-боксе
+const LOG_HISTORY_MAX = 5000; // максимум записей в истории (save/filter)
+
+// pushCapped добавляет запись и обрезает историю до LOG_HISTORY_MAX.
+function pushCapped(arr, entry) {
+  arr.push(entry);
+  if (arr.length > LOG_HISTORY_MAX) arr.splice(0, arr.length - LOG_HISTORY_MAX);
+}
+
 // ── Иконки (inline SVG для динамической разметки) ───────────────────────────
 
 const ICO = {
@@ -157,6 +168,14 @@ window.addEventListener('load', async () => {
       if (row) row.style.display = 'none';
     }
   } catch (e) { console.error('SystemProxySupported:', e); }
+
+  try {
+    const gpuSupported = await window.go.main.App.GpuSupported();
+    if (!gpuSupported) {
+      const card = document.getElementById('gpu-card');
+      if (card) card.style.display = 'none';
+    }
+  } catch (e) { console.error('GpuSupported:', e); }
 
   // Загружаем конфиг и заполняем поля
   try {
@@ -314,6 +333,9 @@ function loadConfig(cfg) {
   if (arw) arw.checked = cfg.auto_restore_on_wake !== false;
   const arn = document.getElementById('auto-restore-net');
   if (arn) arn.checked = cfg.auto_restore_on_net_change !== false;
+  // GPU: undefined/null → включено (совпадает с дефолтом в main.go).
+  const gpu = document.getElementById('gpu-accel');
+  if (gpu) gpu.checked = cfg.disable_gpu !== true;
   toggleAuth();
 }
 
@@ -340,6 +362,7 @@ function collectConfig() {
     tray_on_minimize: document.getElementById('minimize-tray-on-min')?.checked || false,
     auto_restore_on_wake: document.getElementById('auto-restore-wake')?.checked || false,
     auto_restore_on_net_change: document.getElementById('auto-restore-net')?.checked || false,
+    disable_gpu: !(document.getElementById('gpu-accel')?.checked ?? true),
     theme:        document.body.classList.contains('light') ? 'light' : 'dark',
   };
 }
@@ -347,6 +370,12 @@ function collectConfig() {
 async function saveConfig() {
   const cfg = collectConfig();
   await window.go.main.App.SaveConfig(cfg);
+}
+
+// GPU-ускорение WebView2 фиксируется при создании окна — применяется после перезапуска.
+function onGpuToggle() {
+  saveConfig();
+  showToast('Настройка GPU применится после перезапуска приложения', 'warn');
 }
 
 // ── Профили подключения ───────────────────────────────────────────────────────
@@ -945,7 +974,7 @@ function onSysProxyStatus(on) {
 function connLog(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const entry = {ts, msg, lv};
-  state.connEntries.push(entry);
+  pushCapped(state.connEntries, entry);
   // Всегда добавляем в DOM — бокс может быть скрыт но данные актуальны
   appendConnLine(entry);
 }
@@ -1030,9 +1059,13 @@ function onSocksStats(stats) {
   }
 }
 
-// Получаем события подключений прокси
-function onSocksLog(entry) {
-  connLog(entry.msg, entry.lv);
+// Получаем события подключений прокси (батч строк из backend)
+function onSocksLog(entries) {
+  if (Array.isArray(entries)) {
+    for (const e of entries) connLog(e.msg, e.lv);
+  } else {
+    connLog(entries.msg, entries.lv);
+  }
 }
 
 // ── Лог маршрутизации (ruleset) ───────────────────────────────────────────
@@ -1708,13 +1741,14 @@ function appendLogEntryTo(box, ts, lv, msg) {
   const line = document.createElement('div');
   line.innerHTML = `<span class="log-ts">[${escHtml(String(ts))}]</span> <span class="log-${escAttr(String(lv))}">${escHtml(String(msg))}</span>`;
   box.appendChild(line);
+  while (box.childElementCount > LOG_DOM_MAX) box.removeChild(box.firstElementChild);
   return stick;
 }
 
 function log(msg, lv = 'info') {
   const ts = new Date().toLocaleTimeString('ru', {hour12: false});
   const entry = {ts, msg, lv};
-  state.logEntries.push(entry);
+  pushCapped(state.logEntries, entry);
   const f = state.logFilter;
   if (f === 'all' || lv === f || (f === 'warn' && (lv === 'warn' || lv === 'error'))) {
     appendLogLine(entry);

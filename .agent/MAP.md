@@ -11,7 +11,7 @@
   - syscall_windows.go / syscall_unix.go / syscall_darwin.go — WinINET & cross-compile stubs
   - captcha_interceptor.go + captcha_webview_{windows,darwin,other}.go — manual VK captcha window
   - tray_{common,windows,darwin,stub,icon}.go — system tray (platform variants + stub)
-  - parse_test.go, ruleset_manager_test.go — unit tests
+  - app_test.go, parse_test.go, ruleset_manager_test.go — unit tests
 frontend/ — vanilla HTML/CSS/JS UI (no framework, no bundler); entry: index.html
 go_client/ — tunnel engine, AUTO-SYNCED from upstream — DO NOT EDIT; entry: main.go
 server_src/ — Linux server (wdtt-server), AUTO-SYNCED — DO NOT EDIT; entry: main.go; Linux-only

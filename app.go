@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const AppVersion = "0.3.1.2"
+const AppVersion = "0.3.1.3"
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,11 @@ type Config struct {
 	// и при смене сети. По умолчанию включено (см. loadConfig).
 	AutoRestoreOnWake      bool `json:"auto_restore_on_wake"`
 	AutoRestoreOnNetChange bool `json:"auto_restore_on_net_change"`
+	// DisableGpu — отключение GPU-ускорения WebView2. Указатель, чтобы отличать
+	// «не задано» (nil) от явного false: при nil берётся env WDTT_DISABLE_GPU, иначе
+	// дефолт — ускорение включено. Читается в main.go ДО создания окна (WebView2
+	// фиксирует флаг при создании окна), поэтому смена применяется после перезапуска.
+	DisableGpu *bool `json:"disable_gpu,omitempty"`
 }
 
 // ── Log entry ─────────────────────────────────────────────────────────────────
@@ -177,6 +182,17 @@ type App struct {
 
 	// Прокси (SOCKS5 + HTTP)
 	proxy *ProxyServer
+
+	// Коалесинг высокочастотных UI-событий прокси. Соединения и статистика
+	// генерируются на каждое соединение; системный прокси с фоновым трафиком
+	// Windows даёт десятки событий в секунду, а WebView2 с отключённым GPU
+	// рисует на CPU. Батчим строки лога и троттлим статистику.
+	proxyEventStop chan struct{}
+	connLogMu      sync.Mutex
+	connLogBuf     []LogEntry
+	statsMu        sync.Mutex
+	statsLatest    ProxyStats
+	statsDirty     bool
 
 	// Маршрутизация по правилам (ruleset)
 	ruleset *RulesetManager
@@ -306,6 +322,10 @@ func (a *App) startup(ctx context.Context) {
 	// Следим за сменой сети — при изменении интерфейсов перезапускаем туннель.
 	a.netStop = make(chan struct{})
 	go a.startNetMonitor(a.netStop)
+
+	// Коалесинг высокочастотных событий прокси (лог соединений + статистика).
+	a.proxyEventStop = make(chan struct{})
+	go a.proxyEventFlusher(a.proxyEventStop)
 }
 
 // beforeClose вызывается Wails перед закрытием окна.
@@ -494,6 +514,10 @@ func (a *App) shutdown(ctx context.Context) {
 		close(a.netStop)
 		a.netStop = nil
 	}
+	if a.proxyEventStop != nil {
+		close(a.proxyEventStop)
+		a.proxyEventStop = nil
+	}
 	trayRemove(a)
 	a.SystemProxyDisable() // снять перенаправление и восстановить настройки
 	a.TunnelStop()
@@ -502,6 +526,40 @@ func (a *App) shutdown(ctx context.Context) {
 }
 
 // ── Config API ────────────────────────────────────────────────────────────────
+
+// configFilePath возвращает путь к конфигу рядом с исполняемым файлом. Общий для
+// startup и для чтения настроек до создания окна (main.go читает GPU-флаг).
+func configFilePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "windtt_config.json"
+	}
+	return filepath.Join(filepath.Dir(exe), "windtt_config.json")
+}
+
+// gpuDisabledFromConfig читает флаг отключения GPU-ускорения из конфига ДО
+// создания окна. set == false означает, что ключа нет (или файл отсутствует/
+// повреждён) — вызывающий тогда решает по env-переменной и дефолту.
+func gpuDisabledFromConfig() (disabled, set bool) {
+	data, err := os.ReadFile(configFilePath())
+	if err != nil {
+		return false, false
+	}
+	return parseGpuDisabled(data)
+}
+
+// parseGpuDisabled разбирает флаг disable_gpu из сырого JSON конфига.
+// set == false — ключа нет или JSON невалиден.
+func parseGpuDisabled(data []byte) (disabled, set bool) {
+	var c Config
+	if json.Unmarshal(data, &c) != nil || c.DisableGpu == nil {
+		return false, false
+	}
+	return *c.DisableGpu, true
+}
+
+// GpuSupported сообщает фронтенду, доступна ли настройка GPU-ускорения (Windows).
+func (a *App) GpuSupported() bool { return gpuSupported() }
 
 func (a *App) loadConfig() {
 	// Дефолты автовосстановления — включено: старые конфиги (без этих ключей),
@@ -893,20 +951,75 @@ var (
 	reAdminID  = regexp.MustCompile(`^\d{1,20}$`)
 )
 
+// proxyEventFlushInterval — период сброса накопленных событий прокси в UI:
+// один IPC-вызов с пачкой строк вместо вызова на каждую строку.
+const proxyEventFlushInterval = 200 * time.Millisecond
+
+// connLogBatchMax — предохранитель: при всплеске соединений сбрасываем батч,
+// не дожидаясь тика, чтобы буфер не рос безгранично.
+const connLogBatchMax = 500
+
 // socksLog разделяет события прокси на два потока:
 //   - строки соединений (начинаются с "→ ") → событие socks:log (вкладка «Подключения»);
 //   - события жизни прокси (старт/стоп/системный прокси) → событие log (вкладка «Общий»).
 func (a *App) socksLog(msg, lv string) {
 	ts := time.Now().Format("15:04:05")
 	if strings.HasPrefix(msg, "→ ") {
-		runtime.EventsEmit(a.ctx, "socks:log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
+		a.connLogMu.Lock()
+		a.connLogBuf = append(a.connLogBuf, LogEntry{Ts: ts, Msg: msg, Lv: lv})
+		full := len(a.connLogBuf) >= connLogBatchMax
+		a.connLogMu.Unlock()
+		if full {
+			a.flushProxyEvents()
+		}
 		return
 	}
 	runtime.EventsEmit(a.ctx, "log", LogEntry{Ts: ts, Msg: msg, Lv: lv})
 }
 
 func (a *App) onProxyStats(stats ProxyStats) {
-	runtime.EventsEmit(a.ctx, "socks:stats", stats)
+	a.statsMu.Lock()
+	a.statsLatest = stats
+	a.statsDirty = true
+	a.statsMu.Unlock()
+}
+
+// flushProxyEvents отправляет накопленные события прокси одним IPC-вызовом.
+// Безопасно вызывать конкурентно: буферы забираются под замком.
+func (a *App) flushProxyEvents() {
+	if a.ctx == nil {
+		return
+	}
+	a.connLogMu.Lock()
+	batch := a.connLogBuf
+	a.connLogBuf = nil
+	a.connLogMu.Unlock()
+	if len(batch) > 0 {
+		runtime.EventsEmit(a.ctx, "socks:log", batch)
+	}
+
+	a.statsMu.Lock()
+	dirty := a.statsDirty
+	latest := a.statsLatest
+	a.statsDirty = false
+	a.statsMu.Unlock()
+	if dirty {
+		runtime.EventsEmit(a.ctx, "socks:stats", latest)
+	}
+}
+
+func (a *App) proxyEventFlusher(stop chan struct{}) {
+	ticker := time.NewTicker(proxyEventFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			a.flushProxyEvents()
+			return
+		case <-ticker.C:
+			a.flushProxyEvents()
+		}
+	}
 }
 
 func (a *App) deployLog(msg, lv string) {

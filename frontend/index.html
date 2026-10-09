@@ -548,6 +548,14 @@ PersistentKeepalive = 25
             <span>Перезапускать туннель при смене сети</span>
           </label>
         </div>
+        <div class="card" id="gpu-card">
+          <h3 class="settings-title">Производительность</h3>
+          <label class="tray-option" title="Аппаратное ускорение интерфейса (WebView2). Отключение перекладывает отрисовку на CPU и может греть ноутбук — выключайте только если окно отображается некорректно.">
+            <input type="checkbox" id="gpu-accel" onchange="onGpuToggle()">
+            <span>Аппаратное ускорение (GPU)</span>
+          </label>
+          <p class="hint">Применяется после перезапуска приложения. Отключите, если окно отображается некорректно.</p>
+        </div>
         <div class="card">
           <h3 class="settings-title">Импорт / Экспорт</h3>
           <p class="hint hint--spaced">Экспорт сохраняет все настройки в JSON-файл для резервной копии или переноса на другой компьютер. Импорт полностью заменяет текущую конфигурацию.</p>

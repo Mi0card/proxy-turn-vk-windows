@@ -19,6 +19,10 @@ func sysProcAttr() *syscall.SysProcAttr {
 // sysProxySupported сообщает фронтенду, доступна ли фича на этой платформе.
 func sysProxySupported() bool { return true }
 
+// gpuSupported — на macOS настройка GPU-ускорения WebView2 недоступна
+// (WKWebView всегда использует GPU; опция WebviewGpuIsDisabled — Windows-only).
+func gpuSupported() bool { return false }
+
 // ── System proxy через networksetup (macOS) ──────────────────────────────────
 //
 // Включаем системный прокси (HTTP/HTTPS) настройкой сетевых сервисов через
