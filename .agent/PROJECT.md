@@ -18,7 +18,8 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
   (amurcanov/proxy-turn-vk-android), not local patches.
 - Frontend stays vanilla JS/HTML/CSS — no bundlers/frameworks without an explicit request.
 - Educational project; no production guarantees. License GPL-3.0 — check compat before adding deps.
-- macOS: no system-proxy feature (checkbox hidden); SOCKS5 127.0.0.1:1080 / HTTP 127.0.0.1:1081 manual.
+- macOS system proxy IS supported (syscall_darwin.go, networksetup web/secure proxy for all services);
+  SOCKS5 127.0.0.1:1080 / HTTP 127.0.0.1:1081 also available. GPU-accel toggle is Windows-only (gpuSupported false on darwin).
 - server_src compiles for linux/amd64 only; its `go test` cannot run on a Windows host.
 
 ## Glossary (domain terms with exact meanings — misreading one produces wrong code)
