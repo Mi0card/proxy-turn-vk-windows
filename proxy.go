@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/dns/dnsmessage"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
@@ -28,10 +31,295 @@ type wgTunnel struct {
 	mu     sync.Mutex
 	dev    *device.Device
 	tnet   *netstack.Net
+	dns    []netip.Addr // DNS-серверы нетстака (для параллельного резолвера)
 	active bool
 }
 
 var wgTun = &wgTunnel{}
+
+// ── DNS-резолвер поверх netstack ──────────────────────────────────────────────
+//
+// Штатный резолвер gvisor (tun.go tryOneName) опрашивает DNS-серверы
+// ПОСЛЕДОВАТЕЛЬНО, по 5с на каждый и весь список дважды: один неответивший
+// сервер в конфиге = +5с, два = +10с на КАЖДЫЙ новый хост. Здесь те же
+// A-запросы поверх того же netstack, но ко ВСЕМ серверам параллельно — берём
+// первый ответ; результат кэшируется. DNS остаётся в туннеле (без утечки к ISP).
+
+const (
+	dnsQueryTimeout = 2 * time.Second
+	dnsCacheTTL     = 5 * time.Minute
+	dnsNegCacheTTL  = 30 * time.Second
+	dnsCacheMax     = 1024
+)
+
+var errDNSNoSuchHost = errors.New("no such host")
+
+type dnsAnswers struct {
+	ips        []netip.Addr
+	rcode      dnsmessage.RCode
+	noSuchHost bool
+}
+
+// parseDNSAnswers собирает A-записи из ответа (игнорируя CNAME и прочее).
+// matched=false, если ответ не про наш запрос (чужой ID / не response).
+func parseDNSAnswers(b []byte, expectID uint16) (dnsAnswers, bool) {
+	var p dnsmessage.Parser
+	h, err := p.Start(b)
+	if err != nil || h.ID != expectID || !h.Response {
+		return dnsAnswers{}, false
+	}
+	if err := p.SkipAllQuestions(); err != nil {
+		return dnsAnswers{}, false
+	}
+	a := dnsAnswers{rcode: h.RCode}
+	if h.RCode == dnsmessage.RCodeNameError {
+		a.noSuchHost = true
+		return a, true
+	}
+	if h.RCode != dnsmessage.RCodeSuccess {
+		return a, true
+	}
+	for {
+		ah, err := p.AnswerHeader()
+		if err == dnsmessage.ErrSectionDone {
+			break
+		}
+		if err != nil {
+			return dnsAnswers{}, false
+		}
+		if ah.Type == dnsmessage.TypeA {
+			r, err := p.AResource()
+			if err != nil {
+				return dnsAnswers{}, false
+			}
+			a.ips = append(a.ips, netip.AddrFrom4(r.A))
+		} else if err := p.SkipAnswer(); err != nil {
+			return dnsAnswers{}, false
+		}
+	}
+	return a, true
+}
+
+// dnsQueryA шлёт один A-запрос к server через netstack.
+func dnsQueryA(ctx context.Context, tnet *netstack.Net, server netip.Addr, host string) ([]netip.Addr, error) {
+	name, err := dnsmessage.NewName(host + ".")
+	if err != nil {
+		return nil, err
+	}
+	var idb [2]byte
+	if _, err := rand.Read(idb[:]); err != nil {
+		return nil, err
+	}
+	id := binary.BigEndian.Uint16(idb[:])
+
+	build := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
+	build.EnableCompression()
+	if err := build.StartQuestions(); err != nil {
+		return nil, err
+	}
+	if err := build.Question(dnsmessage.Question{
+		Name:  name,
+		Type:  dnsmessage.TypeA,
+		Class: dnsmessage.ClassINET,
+	}); err != nil {
+		return nil, err
+	}
+	msg, err := build.Finish()
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := tnet.DialUDPAddrPort(netip.AddrPort{}, netip.AddrPortFrom(server, 53))
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	if d, ok := ctx.Deadline(); ok {
+		_ = c.SetDeadline(d)
+	}
+	if _, err := c.Write(msg); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 1500)
+	for {
+		n, err := c.Read(buf)
+		if err != nil {
+			return nil, err
+		}
+		ans, matched := parseDNSAnswers(buf[:n], id)
+		if !matched {
+			continue
+		}
+		if ans.noSuchHost {
+			return nil, errDNSNoSuchHost
+		}
+		if ans.rcode != dnsmessage.RCodeSuccess {
+			return nil, fmt.Errorf("DNS rcode %d", ans.rcode)
+		}
+		return ans.ips, nil
+	}
+}
+
+// resolveViaNetstack опрашивает все серверы параллельно, берёт первый
+// осмысленный ответ; errDNSNoSuchHost (NXDOMAIN) — тоже результат.
+func resolveViaNetstack(ctx context.Context, tnet *netstack.Net, servers []netip.Addr, host string) ([]netip.Addr, error) {
+	if tnet == nil {
+		return nil, fmt.Errorf("туннель не активен")
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("нет DNS-серверов")
+	}
+	type res struct {
+		ips []netip.Addr
+		err error
+	}
+	qctx, cancel := context.WithTimeout(ctx, dnsQueryTimeout)
+	defer cancel()
+	ch := make(chan res, len(servers))
+	for _, s := range servers {
+		go func(s netip.Addr) {
+			ips, err := dnsQueryA(qctx, tnet, s, host)
+			ch <- res{ips, err}
+		}(s)
+	}
+	var firstErr error
+	for i := 0; i < len(servers); i++ {
+		r := <-ch
+		if errors.Is(r.err, errDNSNoSuchHost) {
+			return nil, errDNSNoSuchHost
+		}
+		if r.err == nil && len(r.ips) > 0 {
+			return r.ips, nil
+		}
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+	}
+	if firstErr == nil {
+		firstErr = fmt.Errorf("нет ответа от DNS для %s", host)
+	}
+	return nil, firstErr
+}
+
+func currentDNSServers() []netip.Addr {
+	wgTun.mu.Lock()
+	defer wgTun.mu.Unlock()
+	return append([]netip.Addr(nil), wgTun.dns...)
+}
+
+// resolveHost — резолв с кэшем; при отсутствии определённого ответа падает на
+// штатный резолвер gvisor (тот же список, но последовательный — медленно, зато
+// покрывает edge-случаи).
+func resolveHost(ctx context.Context, tnet *netstack.Net, host string) ([]netip.Addr, error) {
+	if ips, ok := dnsCacheGet(host); ok {
+		if len(ips) == 0 {
+			return nil, errDNSNoSuchHost
+		}
+		return ips, nil
+	}
+	ips, err := resolveViaNetstack(ctx, tnet, currentDNSServers(), host)
+	if err == nil && len(ips) > 0 {
+		dnsCachePut(host, ips, dnsCacheTTL)
+		return ips, nil
+	}
+	if errors.Is(err, errDNSNoSuchHost) {
+		dnsCachePut(host, nil, dnsNegCacheTTL)
+		return nil, errDNSNoSuchHost
+	}
+	if h, herr := tnet.LookupContextHost(ctx, host); herr == nil && len(h) > 0 {
+		var out []netip.Addr
+		for _, s := range h {
+			if ip, e := netip.ParseAddr(s); e == nil {
+				out = append(out, ip)
+			}
+		}
+		if len(out) > 0 {
+			dnsCachePut(host, out, dnsCacheTTL)
+			return out, nil
+		}
+	} else if herr != nil {
+		var dnsErr *net.DNSError
+		if errors.As(herr, &dnsErr) && dnsErr.IsNotFound {
+			dnsCachePut(host, nil, dnsNegCacheTTL)
+			return nil, errDNSNoSuchHost
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("нет DNS-ответа для %s", host)
+}
+
+type dnsCacheEntry struct {
+	ips     []netip.Addr
+	expires time.Time
+}
+
+var dnsCache = struct {
+	mu    sync.Mutex
+	items map[string]dnsCacheEntry
+}{items: map[string]dnsCacheEntry{}}
+
+func dnsCacheGet(host string) ([]netip.Addr, bool) {
+	dnsCache.mu.Lock()
+	defer dnsCache.mu.Unlock()
+	e, ok := dnsCache.items[host]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.expires) {
+		delete(dnsCache.items, host)
+		return nil, false
+	}
+	return e.ips, true
+}
+
+func dnsCachePut(host string, ips []netip.Addr, ttl time.Duration) {
+	dnsCache.mu.Lock()
+	defer dnsCache.mu.Unlock()
+	if len(dnsCache.items) >= dnsCacheMax {
+		dnsCache.items = map[string]dnsCacheEntry{}
+	}
+	dnsCache.items[host] = dnsCacheEntry{ips: ips, expires: time.Now().Add(ttl)}
+}
+
+func dnsCacheClear() {
+	dnsCache.mu.Lock()
+	dnsCache.items = map[string]dnsCacheEntry{}
+	dnsCache.mu.Unlock()
+}
+
+// dialNetstack — диалог через netstack. Хост резолвится нашим параллельным
+// резолвером, затем dial идёт по IP; при провале резолва — обычный
+// tnet.DialContext (внутренний последовательный gvisor-резолвер).
+func dialNetstack(ctx context.Context, tnet *netstack.Net, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || net.ParseIP(host) != nil {
+		return tnet.DialContext(ctx, network, addr)
+	}
+
+	ips, rerr := resolveHost(ctx, tnet, host)
+
+	if rerr != nil || len(ips) == 0 {
+		// Определённый NXDOMAIN не переспрашиваем медленным gvisor-резолвером.
+		if errors.Is(rerr, errDNSNoSuchHost) {
+			return nil, fmt.Errorf("lookup %s: %w", host, errDNSNoSuchHost)
+		}
+		return tnet.DialContext(ctx, network, addr)
+	}
+
+	var firstErr error
+	for _, ip := range ips {
+		c, derr := tnet.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return c, nil
+		}
+		if firstErr == nil {
+			firstErr = derr
+		}
+	}
+	return nil, firstErr
+}
 
 // wgDialStrict — только через туннель, без fallback на прямое соединение.
 // Используется системным прокси: нет туннеля → ошибка → браузер получает 502.
@@ -51,7 +339,7 @@ func wgDialStrictTimeout(network, addr string, timeout time.Duration) (net.Conn,
 	if active && tnet != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		return tnet.DialContext(ctx, network, addr)
+		return dialNetstack(ctx, tnet, network, addr)
 	}
 	return nil, fmt.Errorf("туннель не активен")
 }
@@ -70,7 +358,7 @@ func wgDialFallbackTimeout(network, addr string, timeout time.Duration) (net.Con
 	if active && tnet != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		return tnet.DialContext(ctx, network, addr)
+		return dialNetstack(ctx, tnet, network, addr)
 	}
 	return net.DialTimeout(network, addr, timeout)
 }
@@ -83,7 +371,9 @@ func StartWGTunnel(conf string, dnsOverride []netip.Addr) error {
 		wgTun.dev.Close()
 		wgTun.dev = nil
 		wgTun.tnet = nil
+		wgTun.dns = nil
 	}
+	dnsCacheClear()
 
 	parsed, err := parseWGConf(conf)
 	if err != nil {
@@ -113,6 +403,7 @@ func StartWGTunnel(conf string, dnsOverride []netip.Addr) error {
 
 	wgTun.dev = dev
 	wgTun.tnet = tnet
+	wgTun.dns = parsed.dns
 	wgTun.active = true
 	return nil
 }
@@ -124,8 +415,10 @@ func StopWGTunnel() {
 		wgTun.dev.Close()
 		wgTun.dev = nil
 		wgTun.tnet = nil
+		wgTun.dns = nil
 	}
 	wgTun.active = false
+	dnsCacheClear()
 }
 
 func WGTunnelActive() bool {

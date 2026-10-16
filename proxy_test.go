@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 // ── route ─────────────────────────────────────────────────────────────────────
@@ -549,4 +551,98 @@ func TestWgDialFallbackNoTunnel(t *testing.T) {
 		t.Fatalf("fallback dial без туннеля: %v", err)
 	}
 	conn.Close()
+}
+
+// ── DNS-резолвер ──────────────────────────────────────────────────────────────
+
+func buildDNSResponse(t *testing.T, id uint16, rcode dnsmessage.RCode, answers []netip.Addr) []byte {
+	t.Helper()
+	name, err := dnsmessage.NewName("example.com.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, RCode: rcode})
+	b.EnableCompression()
+	if err := b.StartQuestions(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Question(dnsmessage.Question{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.StartAnswers(); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range answers {
+		hdr := dnsmessage.ResourceHeader{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 60}
+		if err := b.AResource(hdr, dnsmessage.AResource{A: ip.As4()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msg, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return msg
+}
+
+func TestParseDNSAnswersA(t *testing.T) {
+	ip := netip.MustParseAddr("104.16.133.229")
+	msg := buildDNSResponse(t, 0x1234, dnsmessage.RCodeSuccess, []netip.Addr{ip})
+
+	ans, ok := parseDNSAnswers(msg, 0x1234)
+	if !ok {
+		t.Fatal("ответ должен опознаться как наш")
+	}
+	if ans.rcode != dnsmessage.RCodeSuccess || ans.noSuchHost {
+		t.Fatalf("rcode=%v noSuchHost=%v", ans.rcode, ans.noSuchHost)
+	}
+	if len(ans.ips) != 1 || ans.ips[0] != ip {
+		t.Fatalf("ips=%v, ожидалось [%v]", ans.ips, ip)
+	}
+}
+
+func TestParseDNSAnswersNXDOMAIN(t *testing.T) {
+	msg := buildDNSResponse(t, 7, dnsmessage.RCodeNameError, nil)
+	ans, ok := parseDNSAnswers(msg, 7)
+	if !ok || !ans.noSuchHost {
+		t.Fatalf("ожидался NXDOMAIN: ok=%v ans=%+v", ok, ans)
+	}
+}
+
+func TestParseDNSAnswersWrongID(t *testing.T) {
+	msg := buildDNSResponse(t, 1, dnsmessage.RCodeSuccess, []netip.Addr{netip.MustParseAddr("1.2.3.4")})
+	if _, ok := parseDNSAnswers(msg, 2); ok {
+		t.Fatal("ответ с чужим ID не должен опознаваться")
+	}
+}
+
+func TestDNSCache(t *testing.T) {
+	dnsCacheClear()
+	t.Cleanup(dnsCacheClear)
+
+	if _, ok := dnsCacheGet("a.example"); ok {
+		t.Fatal("пустой кэш вернул попадание")
+	}
+	ip := netip.MustParseAddr("1.2.3.4")
+	dnsCachePut("a.example", []netip.Addr{ip}, time.Minute)
+	got, ok := dnsCacheGet("a.example")
+	if !ok || len(got) != 1 || got[0] != ip {
+		t.Fatalf("кэш: got=%v ok=%v", got, ok)
+	}
+
+	dnsCachePut("bad.example", nil, time.Minute)
+	if ips, ok := dnsCacheGet("bad.example"); !ok || len(ips) != 0 {
+		t.Fatalf("негативный кэш не сохранён: ips=%v ok=%v", ips, ok)
+	}
+
+	dnsCachePut("exp.example", []netip.Addr{ip}, time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+	if _, ok := dnsCacheGet("exp.example"); ok {
+		t.Fatal("просроченная запись вернулась")
+	}
+
+	dnsCacheClear()
+	if _, ok := dnsCacheGet("a.example"); ok {
+		t.Fatal("dnsCacheClear не очистил")
+	}
 }

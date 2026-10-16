@@ -29,7 +29,7 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
 - WinINET — Windows internet settings store (registry HKCU) that browsers/Office honor.
 - ruleset — routing rule set: `domain:`, `domain-suffix:`, `keyword:`, `regex:`, `cidr:`, `ip:` and
   `ruleset:geosite-<g>`/`geoip-<g>` from v2ray protobuf dat files; policies block/direct/proxy, first match wins.
-- AppVersion — version const in app.go:30 (`0.3.1.2`); bumping it triggers the CI build.
+- AppVersion — version const in app.go:30 (`0.3.2`); bumping it triggers the CI build.
 - CaptchaMode / ObfsMode — per-profile tunnel options surfaced in the UI and passed to the engine.
 
 ## Landmines (cross-cutting gotchas, ≤15; area-specific ones belong in .agent/areas/)
@@ -51,3 +51,6 @@ user in a native WebView2 (Windows) / WKWebView (macOS) window, then fed back to
 - Cross-platform build tags matter: syscall_/captcha_/tray_ files are per-OS — keep all buildable
   (syscall_unix.go & captcha_webview_other.go & tray_stub.go are the non-Win/mac fallbacks).
 - Manual captcha on macOS goes through darwinkit (WKWebView) — heavier dep; Windows uses go-webview2.
+- Slow first connect (~10s) → gvisor netstack DNS (wireguard tun/netstack tun.go `tryOneName`) walks
+  Config.DNS SEQUENTIALLY, 5s each, twice; a dead server in the `dns` list costs ~5s on EVERY fresh
+  hostname (tcp itself is fine). proxy.go bypasses it with a parallel resolver+cache — keep that path.
