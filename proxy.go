@@ -60,6 +60,11 @@ type dnsAnswers struct {
 	noSuchHost bool
 }
 
+type dnsQueryResult struct {
+	ips []netip.Addr
+	err error
+}
+
 // parseDNSAnswers собирает A-записи из ответа (игнорируя CNAME и прочее).
 // matched=false, если ответ не про наш запрос (чужой ID / не response).
 func parseDNSAnswers(b []byte, expectID uint16) (dnsAnswers, bool) {
@@ -160,8 +165,7 @@ func dnsQueryA(ctx context.Context, tnet *netstack.Net, server netip.Addr, host 
 	}
 }
 
-// resolveViaNetstack опрашивает все серверы параллельно, берёт первый
-// осмысленный ответ; errDNSNoSuchHost (NXDOMAIN) — тоже результат.
+// resolveViaNetstack опрашивает все серверы параллельно.
 func resolveViaNetstack(ctx context.Context, tnet *netstack.Net, servers []netip.Addr, host string) ([]netip.Addr, error) {
 	if tnet == nil {
 		return nil, fmt.Errorf("туннель не активен")
@@ -169,31 +173,40 @@ func resolveViaNetstack(ctx context.Context, tnet *netstack.Net, servers []netip
 	if len(servers) == 0 {
 		return nil, fmt.Errorf("нет DNS-серверов")
 	}
-	type res struct {
-		ips []netip.Addr
-		err error
-	}
 	qctx, cancel := context.WithTimeout(ctx, dnsQueryTimeout)
 	defer cancel()
-	ch := make(chan res, len(servers))
+	ch := make(chan dnsQueryResult, len(servers))
 	for _, s := range servers {
 		go func(s netip.Addr) {
 			ips, err := dnsQueryA(qctx, tnet, s, host)
-			ch <- res{ips, err}
+			ch <- dnsQueryResult{ips, err}
 		}(s)
 	}
+	return collectDNSResults(ch, len(servers), host)
+}
+
+// collectDNSResults отдаёт положительный ответ, как только он пришёл. NXDOMAIN
+// запоминается и становится окончательным, только если ни один сервер не
+// вернул A-записи: при split-DNS или рассинхроне зон один сервер не должен
+// перебивать валидный ответ другого.
+func collectDNSResults(ch <-chan dnsQueryResult, n int, host string) ([]netip.Addr, error) {
 	var firstErr error
-	for i := 0; i < len(servers); i++ {
+	sawNXDOMAIN := false
+	for i := 0; i < n; i++ {
 		r := <-ch
-		if errors.Is(r.err, errDNSNoSuchHost) {
-			return nil, errDNSNoSuchHost
-		}
 		if r.err == nil && len(r.ips) > 0 {
 			return r.ips, nil
+		}
+		if errors.Is(r.err, errDNSNoSuchHost) {
+			sawNXDOMAIN = true
+			continue
 		}
 		if r.err != nil && firstErr == nil {
 			firstErr = r.err
 		}
+	}
+	if sawNXDOMAIN {
+		return nil, errDNSNoSuchHost
 	}
 	if firstErr == nil {
 		firstErr = fmt.Errorf("нет ответа от DNS для %s", host)

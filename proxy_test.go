@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -613,6 +614,50 @@ func TestParseDNSAnswersWrongID(t *testing.T) {
 	msg := buildDNSResponse(t, 1, dnsmessage.RCodeSuccess, []netip.Addr{netip.MustParseAddr("1.2.3.4")})
 	if _, ok := parseDNSAnswers(msg, 2); ok {
 		t.Fatal("ответ с чужим ID не должен опознаваться")
+	}
+}
+
+func TestCollectDNSResultsNXDOMAINDoesNotMaskPositive(t *testing.T) {
+	ip := netip.MustParseAddr("1.2.3.4")
+	ch := make(chan dnsQueryResult, 2)
+	ch <- dnsQueryResult{err: errDNSNoSuchHost}
+	ch <- dnsQueryResult{ips: []netip.Addr{ip}}
+
+	got, err := collectDNSResults(ch, 2, "split.example")
+	if err != nil || len(got) != 1 || got[0] != ip {
+		t.Fatalf("положительный ответ перебит NXDOMAIN: ips=%v err=%v", got, err)
+	}
+}
+
+func TestCollectDNSResultsAllNXDOMAIN(t *testing.T) {
+	ch := make(chan dnsQueryResult, 2)
+	ch <- dnsQueryResult{err: errDNSNoSuchHost}
+	ch <- dnsQueryResult{err: errDNSNoSuchHost}
+
+	if _, err := collectDNSResults(ch, 2, "nx.example"); !errors.Is(err, errDNSNoSuchHost) {
+		t.Fatalf("ожидался NXDOMAIN, получено %v", err)
+	}
+}
+
+func TestCollectDNSResultsNXDOMAINPlusError(t *testing.T) {
+	timeoutErr := errors.New("timeout")
+	ch := make(chan dnsQueryResult, 2)
+	ch <- dnsQueryResult{err: errDNSNoSuchHost}
+	ch <- dnsQueryResult{err: timeoutErr}
+
+	if _, err := collectDNSResults(ch, 2, "nx.example"); !errors.Is(err, errDNSNoSuchHost) {
+		t.Fatalf("после ошибки другого сервера ожидался NXDOMAIN, получено %v", err)
+	}
+}
+
+func TestCollectDNSResultsAllErrors(t *testing.T) {
+	timeoutErr := errors.New("timeout")
+	ch := make(chan dnsQueryResult, 2)
+	ch <- dnsQueryResult{err: timeoutErr}
+	ch <- dnsQueryResult{err: errors.New("refused")}
+
+	if _, err := collectDNSResults(ch, 2, "down.example"); !errors.Is(err, timeoutErr) {
+		t.Fatalf("ожидалась первая ошибка, получено %v", err)
 	}
 }
 

@@ -8,7 +8,8 @@
   (5m / negative 30s), then dials by IP — NOT by the gvisor resolver: its `tryOneName` walks the
   configured servers sequentially (5s each, whole list twice), so a dead server in the user's `dns`
   list added ~5s to EVERY fresh hostname. Keeps DNS in-tunnel (no ISP leak); falls back to the
-  gvisor resolver on no definitive answer; NXDOMAIN short-circuits. (S23.)
+  gvisor resolver on no definitive answer; NXDOMAIN is final only when no parallel server returned
+  an A record — one server must not mask another (amended S24). (S23.)
 - D21 2026-10-09 [perf, user] GPU-ускорение WebView2 переключается из настроек
   (`Config.DisableGpu *bool` `disable_gpu`; указатель отличает «не задано» от явного false).
   Приоритет: конфиг → env `WDTT_DISABLE_GPU` → дефолт (включено). Читается в `main.go` до
