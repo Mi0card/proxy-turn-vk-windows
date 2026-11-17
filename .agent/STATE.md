@@ -3,11 +3,11 @@
 
 Session: 25
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: none. S25: layer patch rebased for upstream v1.4.5, PR #12 merged (dev 448a90b) and
-        version bumped to v0.3.3 to trigger the release build.
-Next: check the v0.3.3 build workflow result; deploy the new wdtt-server (v1.4.5, embedded at next
-      build) to the VPS and smoke-test connect/proxy. Tag v0.3.3 if a release marker is wanted
-      (build.yml only uploads artifacts).
+Active: none. S25: layer patch rebased for upstream v1.4.5, PR #12 merged (dev 448a90b), v0.3.3
+        bumped; macOS build fixed (macos-14 retired → macos-15, universal sidecar via lipo).
+Next: dispatch the Build workflow (workflow_dispatch forces a build without a version bump) to
+      verify the macOS leg; deploy the v1.4.5 server to the VPS and smoke-test connect/proxy.
+      Tag v0.3.3 if a release marker is wanted (build.yml only uploads artifacts).
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)

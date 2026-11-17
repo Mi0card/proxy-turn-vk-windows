@@ -213,7 +213,7 @@ jobs:
   build-macos:
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -273,7 +273,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: wdtt-client.exe
-          key: wdtt-client-darwin-${{ hashFiles('go_client/**') }}
+          key: wdtt-client-darwin-universal-${{ hashFiles('go_client/**') }}
 
       # Собираем wdtt-server (Linux amd64, чистый Go — CGO не нужен)
       - name: Build wdtt-server
@@ -284,14 +284,20 @@ jobs:
           go mod tidy
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../assets/server/wdtt-server .
 
-      # Собираем wdtt-client — нативный Mach-O бинарник (хост = macOS)
-      - name: Build wdtt-client
+      # Собираем wdtt-client для обеих архитектур и склеиваем через lipo:
+      # приложение собирается как darwin/universal, поэтому встроенный сайдкар
+      # тоже обязан быть universal — иначе на одной из архитектур он не запустится.
+      - name: Build wdtt-client (universal)
         if: steps.cache-client-mac.outputs.cache-hit != 'true'
         working-directory: go_client
         run: |
-          rm -f ../wdtt-client.exe
+          rm -f ../wdtt-client.exe ../wdtt-client-amd64 ../wdtt-client-arm64
           go mod tidy
-          go build -ldflags="-s -w" -o ../wdtt-client.exe .
+          CGO_ENABLED=0 GOARCH=amd64 go build -ldflags="-s -w" -o ../wdtt-client-amd64 .
+          CGO_ENABLED=0 GOARCH=arm64 go build -ldflags="-s -w" -o ../wdtt-client-arm64 .
+          lipo -create -output ../wdtt-client.exe ../wdtt-client-amd64 ../wdtt-client-arm64
+          lipo -info ../wdtt-client.exe
+          rm -f ../wdtt-client-amd64 ../wdtt-client-arm64
 
       - name: Set app version in wails.json
         shell: bash
