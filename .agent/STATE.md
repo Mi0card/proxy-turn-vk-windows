@@ -1,12 +1,14 @@
 # State — the single source of "now". Rewritten IN FULL at every session END. Cap: 40 lines.
 <!-- History belongs in journal/. Contradicts git log/journal? Trust git, note the crash there. -->
 
-Session: 24
+Session: 25
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: none. S24 (NXDOMAIN masking fix, v0.3.2.1) COMPLETE, UNCOMMITTED. S23 (v0.3.2) also
-        UNCOMMITTED; its version bump will trigger the CI build on push.
-Next: commit/push pending: S24 (proxy.go DNS aggregation + tests, v0.3.2.1 bump); S23 (proxy.go DNS
-      resolver + tests, go.mod); S22 README/PROJECT; S21 overheat fix; S20 .gitignore + sync.yml.
+Active: none. S25 rebased the local go_client layer patch for upstream v1.4.5; sync CI run 146
+        (step «Re-apply local go_client layer») is fixed.
+Next: dispatch the «Sync from upstream» workflow (or wait for the 06:00 UTC schedule) to open the
+      v1.4.5 PR into dev; review + merge, then dev→main. Local go_client/server_src stay v1.4.4
+      until that PR lands — running apply.sh on this tree still fails by design (it expects a
+      freshly synced go_client).
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -23,9 +25,9 @@ Blocked: none
 - Config top-level `fingerprint` = SSH host-key of VPS (deploy MITM guard) — NOT browser fingerprint.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
-- S24: NXDOMAIN from one DNS server no longer masks another server's valid answer. UNCOMMITTED, v0.3.2.1.
-- S23: first-connect latency fix — parallel DNS resolver + TTL cache in proxy.go (D22). UNCOMMITTED, v0.3.2.
-- S22: README rewrite + macOS-system-proxy doc correction. UNCOMMITTED.
+- S25: sync CI unblocked — local go_client layer patch rebased onto upstream v1.4.5 (dev).
+- S24/S23: NXDOMAIN masking fix + parallel DNS resolver, shipped as v0.3.2.1 (dd44ff2).
+- S22: README rewrite + macOS system-proxy doc correction (committed).
 
 ## Recently audited (cleared — stop re-litigating)
 - S14 audit cleared: proxy transport pool (I6), system-proxy backup tests (I5), renderRuleSuggest XSS

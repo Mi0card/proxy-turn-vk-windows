@@ -74,15 +74,13 @@ index 108af15..cc9e14d 100644
  	}
  
  	numGroups := (*numW + workersPerGroup - 1) / workersPerGroup
-@@ -341,7 +342,7 @@ func main() {
+@@ -397,5 +397,5 @@ func main() {
  	log.Printf("[КЛИЕНТ] TLS: Chrome 146 fingerprint")
  	log.Printf("[КЛИЕНТ] Воркеров: %d (групп: %d, по %d)", *numW, numGroups, workersPerGroup)
  	log.Printf("[КЛИЕНТ] Хешей: %d", len(hashes))
 -	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", *listen, *peerAddr)
 +	log.Printf("[КЛИЕНТ] Слушаю: %s | Пир: %s", localConn.LocalAddr(), *peerAddr)
- 	if *turnTCP {
- 		log.Printf("[КЛИЕНТ] TURN-транспорт: TCP")
- 	} else {
+ 	log.Printf("[КЛИЕНТ] TURN-транспорт: %s", strings.ToUpper(tp.Transport))
 diff --git a/go_client/tun_fd.go b/go_client/tun_fd.go
 index 7ebd698..0b31597 100644
 --- a/go_client/tun_fd.go
