@@ -3,12 +3,11 @@
 
 Session: 25
 Focus: WinDTT — Wails GUI client for a WireGuard-over-VK-TURN tunnel (proxies, routing, VPS deploy)
-Active: none. S25 rebased the local go_client layer patch for upstream v1.4.5; sync CI run 146
-        (step «Re-apply local go_client layer») is fixed.
-Next: dispatch the «Sync from upstream» workflow (or wait for the 06:00 UTC schedule) to open the
-      v1.4.5 PR into dev; review + merge, then dev→main. Local go_client/server_src stay v1.4.4
-      until that PR lands — running apply.sh on this tree still fails by design (it expects a
-      freshly synced go_client).
+Active: none. S25: layer patch rebased for upstream v1.4.5, PR #12 merged (dev 448a90b) and
+        version bumped to v0.3.3 to trigger the release build.
+Next: check the v0.3.3 build workflow result; deploy the new wdtt-server (v1.4.5, embedded at next
+      build) to the VPS and smoke-test connect/proxy. Tag v0.3.3 if a release marker is wanted
+      (build.yml only uploads artifacts).
 Blocked: none
 
 ## Watch-outs (≤5 — things the next session must know; prune ruthlessly)
@@ -25,8 +24,9 @@ Blocked: none
 - Config top-level `fingerprint` = SSH host-key of VPS (deploy MITM guard) — NOT browser fingerprint.
 
 ## Recently shipped (≤3 one-liners; anything older lives in the journal)
-- S25: sync CI unblocked — local go_client layer patch rebased onto upstream v1.4.5 (dev).
-- S24/S23: NXDOMAIN masking fix + parallel DNS resolver, shipped as v0.3.2.1 (dd44ff2).
+- S25: engine synced to upstream v1.4.5 (PR #12: netdiag, flow pinning, DNS chain, up to 162
+  workers) + layer patch rebased; v0.3.3 bump. Build triggered on main.
+- S24/S23: NXDOMAIN masking fix + parallel DNS resolver, v0.3.2.1 (dd44ff2).
 - S22: README rewrite + macOS system-proxy doc correction (committed).
 
 ## Recently audited (cleared — stop re-litigating)
